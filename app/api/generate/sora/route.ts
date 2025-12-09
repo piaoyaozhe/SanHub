@@ -1,0 +1,154 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
+import { generateWithSora } from '@/lib/sora';
+import { saveGeneration, updateUserBalance, getUserById, updateGeneration, getSystemConfig } from '@/lib/db';
+import type { SoraGenerateRequest } from '@/types';
+
+// 配置路由段选项
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
+// 后台处理任务
+async function processGenerationTask(
+  generationId: string,
+  userId: string,
+  body: SoraGenerateRequest
+): Promise<void> {
+  try {
+    console.log(`[Task ${generationId}] 开始处理生成任务`);
+    
+    // 更新状态为 processing
+    await updateGeneration(generationId, { status: 'processing' }).catch(err => {
+      console.error(`[Task ${generationId}] 更新状态失败:`, err);
+    });
+
+    // 调用 Sora API 生成内容
+    const result = await generateWithSora(body);
+
+    console.log(`[Task ${generationId}] 生成成功:`, result.url);
+
+    // 扣除余额
+    await updateUserBalance(userId, -result.cost).catch(err => {
+      console.error(`[Task ${generationId}] 扣除余额失败:`, err);
+    });
+
+    // 更新生成记录为完成状态
+    await updateGeneration(generationId, {
+      status: 'completed',
+      resultUrl: result.url,
+    }).catch(err => {
+      console.error(`[Task ${generationId}] 更新完成状态失败:`, err);
+    });
+
+    console.log(`[Task ${generationId}] 任务完成`);
+  } catch (error) {
+    console.error(`[Task ${generationId}] 任务失败:`, error);
+    
+    // 确保错误消息格式正确
+    let errorMessage = '生成失败';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      // 处理 cause 属性中的额外信息
+      if ('cause' in error && error.cause) {
+        console.error(`[Task ${generationId}] 错误原因:`, error.cause);
+      }
+    }
+    
+    // 更新为失败状态（用 try-catch 确保不会抛出）
+    try {
+      await updateGeneration(generationId, {
+        status: 'failed',
+        errorMessage,
+      });
+    } catch (updateErr) {
+      console.error(`[Task ${generationId}] 更新失败状态时出错:`, updateErr);
+    }
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    // 验证登录
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: '请先登录' }, { status: 401 });
+    }
+
+    const body: SoraGenerateRequest = await request.json();
+
+    if (!body.prompt && (!body.files || body.files.length === 0)) {
+      return NextResponse.json(
+        { error: '请输入提示词或上传参考文件' },
+        { status: 400 }
+      );
+    }
+
+    // 获取最新用户信息
+    const user = await getUserById(session.user.id);
+    if (!user) {
+      return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+    }
+
+    // 预估成本
+    const config = await getSystemConfig();
+    const estimatedCost = body.model.includes('15s')
+      ? config.pricing.soraVideo15s
+      : config.pricing.soraVideo10s;
+
+    // 检查余额
+    if (user.balance < estimatedCost) {
+      return NextResponse.json(
+        { error: `余额不足，需要至少 ${estimatedCost} 积分` },
+        { status: 402 }
+      );
+    }
+
+    // 生成类型固定为视频
+    const type = 'sora-video';
+
+    // 立即创建生成记录（状态为 pending）
+    const generation = await saveGeneration({
+      userId: user.id,
+      type,
+      prompt: body.prompt,
+      params: { model: body.model },
+      resultUrl: '',
+      cost: estimatedCost,
+      status: 'pending',
+    });
+
+    // 在后台异步处理（不等待完成）
+    processGenerationTask(generation.id, user.id, body).catch((err) => {
+      console.error('[API] 后台任务启动失败:', err);
+    });
+
+    // 立即返回任务 ID
+    return NextResponse.json({
+      success: true,
+      data: {
+        id: generation.id,
+        status: 'pending',
+        message: '任务已创建，正在后台处理中',
+      },
+    });
+  } catch (error) {
+    console.error('[API] Sora generation error:', error);
+    
+    const errorMessage = error instanceof Error ? error.message : '生成失败';
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
+    console.error('[API] Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+    });
+
+    return NextResponse.json(
+      { 
+        error: errorMessage,
+        details: process.env.NODE_ENV === 'development' ? errorStack : undefined,
+      },
+      { status: 500 }
+    );
+  }
+}

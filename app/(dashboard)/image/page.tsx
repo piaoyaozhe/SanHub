@@ -1,0 +1,558 @@
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
+import {
+  Image,
+  Upload,
+  Trash2,
+  Wand2,
+  Loader2,
+  AlertCircle,
+  Sparkles,
+  ChevronDown,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { fileToBase64 } from '@/lib/utils';
+import type { Generation } from '@/types';
+import { toast } from '@/components/ui/toaster';
+import { ResultGallery, type Task } from '@/components/generator/result-gallery';
+import {
+  IMAGE_MODELS,
+  getImageModelById,
+  getImageResolution,
+} from '@/lib/model-config';
+
+export default function ImageGenerationPage() {
+  const { update } = useSession();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // 模型选择
+  const [selectedModelId, setSelectedModelId] = useState<string>('gemini-nano');
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+
+  // 参数状态
+  const [aspectRatio, setAspectRatio] = useState<string>('1:1');
+  const [imageSize, setImageSize] = useState<string>('1K');
+  const [prompt, setPrompt] = useState('');
+  const [images, setImages] = useState<{ data: string; mimeType: string; preview: string }[]>([]);
+
+  // 任务状态
+  const [generations, setGenerations] = useState<Generation[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // 获取当前选中的模型配置
+  const currentModel = getImageModelById(selectedModelId) || IMAGE_MODELS[0];
+
+  // 当模型改变时，重置参数到默认值
+  useEffect(() => {
+    const model = getImageModelById(selectedModelId);
+    if (model) {
+      setAspectRatio(model.defaultAspectRatio);
+      if (model.defaultImageSize) {
+        setImageSize(model.defaultImageSize);
+      }
+      // 如果新模型不支持参考图，清除已上传的图片
+      if (!model.features.supportReferenceImage) {
+        setImages((prev) => {
+          prev.forEach((img) => URL.revokeObjectURL(img.preview));
+          return [];
+        });
+      }
+    }
+  }, [selectedModelId]);
+
+  // 加载 pending 任务
+  useEffect(() => {
+    const loadPendingTasks = async () => {
+      try {
+        const res = await fetch('/api/user/tasks');
+        if (res.ok) {
+          const data = await res.json();
+          // 加载图像类型的任务 (gemini 和 zimage)
+          const imageTasks: Task[] = (data.data || [])
+            .filter((t: any) =>
+              t.type?.includes('gemini') ||
+              t.type?.includes('zimage') ||
+              t.type?.includes('gitee')
+            )
+            .map((t: any) => ({
+              id: t.id,
+              prompt: t.prompt,
+              type: t.type,
+              status: t.status as 'pending' | 'processing',
+              createdAt: t.createdAt,
+            }));
+
+          if (imageTasks.length > 0) {
+            setTasks(imageTasks);
+            imageTasks.forEach((task) => {
+              pollTaskStatus(task.id, task.prompt);
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load pending tasks:', err);
+      }
+    };
+
+    loadPendingTasks();
+
+    return () => {
+      abortControllersRef.current.forEach((controller) => controller.abort());
+      abortControllersRef.current.clear();
+    };
+  }, []);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    for (const file of selectedFiles) {
+      if (!file.type.startsWith('image/')) continue;
+      const data = await fileToBase64(file);
+      setImages((prev) => [
+        ...prev,
+        { data, mimeType: file.type, preview: URL.createObjectURL(file) },
+      ]);
+    }
+    e.target.value = '';
+  };
+
+  const clearImages = () => {
+    images.forEach((img) => URL.revokeObjectURL(img.preview));
+    setImages([]);
+  };
+
+  // 轮询任务状态
+  const pollTaskStatus = useCallback(
+    async (taskId: string, taskPrompt: string): Promise<void> => {
+      if (abortControllersRef.current.has(taskId)) return;
+
+      const controller = new AbortController();
+      abortControllersRef.current.set(taskId, controller);
+
+      const maxAttempts = 240;
+      let attempts = 0;
+
+      const poll = async (): Promise<void> => {
+        if (controller.signal.aborted) return;
+
+        if (attempts >= maxAttempts) {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? { ...t, status: 'failed' as const, errorMessage: '任务超时' }
+                : t
+            )
+          );
+          abortControllersRef.current.delete(taskId);
+          return;
+        }
+
+        attempts++;
+
+        try {
+          const res = await fetch(`/api/generate/status/${taskId}`, {
+            signal: controller.signal,
+          });
+          const data = await res.json();
+
+          if (!res.ok) {
+            throw new Error(data.error || '查询任务状态失败');
+          }
+
+          const status = data.data.status;
+
+          if (status === 'completed') {
+            await update();
+
+            const generation: Generation = {
+              id: data.data.id,
+              userId: '',
+              type: data.data.type,
+              prompt: taskPrompt,
+              params: {},
+              resultUrl: data.data.url,
+              cost: data.data.cost,
+              status: 'completed',
+              createdAt: data.data.createdAt,
+              updatedAt: data.data.updatedAt,
+            };
+
+            setTasks((prev) => prev.filter((t) => t.id !== taskId));
+            setGenerations((prev) => [generation, ...prev]);
+
+            toast({
+              title: '生成成功',
+              description: `消耗 ${data.data.cost} 积分`,
+            });
+
+            abortControllersRef.current.delete(taskId);
+          } else if (status === 'failed') {
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId
+                  ? {
+                      ...t,
+                      status: 'failed' as const,
+                      errorMessage: data.data.errorMessage || '生成失败',
+                    }
+                  : t
+              )
+            );
+            abortControllersRef.current.delete(taskId);
+          } else {
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId
+                  ? { ...t, status: status as 'pending' | 'processing' }
+                  : t
+              )
+            );
+            setTimeout(poll, 10000);
+          }
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    status: 'failed' as const,
+                    errorMessage: (err as Error).message,
+                  }
+                : t
+            )
+          );
+          abortControllersRef.current.delete(taskId);
+        }
+      };
+
+      await poll();
+    },
+    [update]
+  );
+
+  const handleRemoveTask = useCallback(async (taskId: string) => {
+    const controller = abortControllersRef.current.get(taskId);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(taskId);
+    }
+
+    try {
+      await fetch(`/api/user/tasks/${taskId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('取消任务请求失败:', err);
+    }
+
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }, []);
+
+  const handleGenerate = async () => {
+    // Gemini 需要提示词或参考图，ZImage 只需要提示词
+    if (currentModel.provider === 'gemini') {
+      if (!prompt.trim() && images.length === 0) {
+        setError('请输入提示词或上传参考图片');
+        return;
+      }
+    } else {
+      if (!prompt.trim()) {
+        setError('请输入提示词');
+        return;
+      }
+    }
+
+    setError('');
+    setSubmitting(true);
+
+    const taskPrompt = prompt.trim();
+
+    try {
+      let res: Response;
+      let taskType: string;
+
+      if (currentModel.provider === 'gemini') {
+        // Gemini API
+        res = await fetch('/api/generate/gemini', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: currentModel.apiModel,
+            prompt: taskPrompt,
+            aspectRatio,
+            imageSize: currentModel.features.supportImageSize ? imageSize : undefined,
+            images: images.map((img) => ({ mimeType: img.mimeType, data: img.data })),
+          }),
+        });
+        taskType = 'gemini-image';
+      } else {
+        // ZImage API
+        const size = getImageResolution(currentModel, aspectRatio);
+        res = await fetch('/api/generate/zimage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: taskPrompt,
+            model: currentModel.apiModel,
+            size,
+            channel: currentModel.channel,
+            ...(currentModel.channel === 'gitee' && { numInferenceSteps: 9 }),
+          }),
+        });
+        taskType = currentModel.channel === 'gitee' ? 'gitee-image' : 'zimage-image';
+      }
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || '生成失败');
+      }
+
+      // 添加任务
+      const newTask: Task = {
+        id: data.data.id,
+        prompt: taskPrompt,
+        type: taskType,
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      setTasks((prev) => [newTask, ...prev]);
+
+      toast({
+        title: '任务已提交',
+        description: '任务已加入队列，可继续提交新任务',
+      });
+
+      // 清空输入
+      setPrompt('');
+      clearImages();
+
+      // 开始轮询
+      pollTaskStatus(data.data.id, taskPrompt);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // 获取当前分辨率显示
+  const getCurrentResolutionDisplay = () => {
+    return getImageResolution(currentModel, aspectRatio, imageSize);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold">图像生成</h1>
+        <p className="text-muted-foreground mt-1">
+          选择模型，生成高质量图像
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5" />
+                图像生成
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Model Selection Dropdown */}
+              <div className="space-y-2">
+                <Label>模型</Label>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    className="w-full flex items-center justify-between px-3 py-2 border border-border bg-input text-foreground rounded-lg focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <div className="flex flex-col items-start">
+                      <span className="font-medium">{currentModel.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {currentModel.description}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform ${
+                        showModelDropdown ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+                  {showModelDropdown && (
+                    <div className="absolute z-50 w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-xl overflow-hidden">
+                      {IMAGE_MODELS.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModelId(model.id);
+                            setShowModelDropdown(false);
+                          }}
+                          className={`w-full flex flex-col items-start px-3 py-2 hover:bg-white/10 transition-colors ${
+                            selectedModelId === model.id ? 'bg-white/10' : ''
+                          }`}
+                        >
+                          <span className="font-medium text-white">{model.name}</span>
+                          <span className="text-xs text-white/50">
+                            {model.description}
+                            {!model.features.supportReferenceImage && ' · 不支持参考图'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Image Size (if supported) */}
+              {currentModel.features.supportImageSize && currentModel.imageSizes && (
+                <div className="space-y-2">
+                  <Label>分辨率</Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {currentModel.imageSizes.map((size) => (
+                      <Button
+                        key={size}
+                        variant={imageSize === size ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setImageSize(size)}
+                      >
+                        {size}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Aspect Ratio */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>画面比例</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {getCurrentResolutionDisplay()}
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-1">
+                  {currentModel.aspectRatios.map((r) => (
+                    <Button
+                      key={r}
+                      variant={aspectRatio === r ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setAspectRatio(r)}
+                      className="text-xs px-1"
+                    >
+                      {r}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Reference Images (if supported) */}
+              {currentModel.features.supportReferenceImage && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>参考图</Label>
+                    {images.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearImages}
+                        className="text-destructive"
+                      >
+                        <Trash2 className="w-3 h-3 mr-1" /> 清除
+                      </Button>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    className="hidden"
+                    multiple
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                  />
+                  {images.length === 0 ? (
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:bg-secondary/50 transition-colors"
+                    >
+                      <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">点击上传参考图</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-4 gap-2">
+                      {images.map((img, i) => (
+                        <div
+                          key={i}
+                          className="aspect-square rounded-lg overflow-hidden bg-secondary"
+                        >
+                          <img
+                            src={img.preview}
+                            className="w-full h-full object-cover"
+                            alt=""
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Prompt */}
+              <div className="space-y-2">
+                <Label>提示词</Label>
+                <textarea
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  placeholder="描述你想要生成的图像..."
+                  className="w-full h-24 px-3 py-2 border border-border bg-input text-foreground rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* Error */}
+              {error && (
+                <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-destructive mt-0.5" />
+                  <p className="text-sm text-destructive">{error}</p>
+                </div>
+              )}
+
+              {/* Generate Button */}
+              <Button
+                onClick={handleGenerate}
+                disabled={submitting}
+                className="w-full gap-2"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    提交中...
+                  </>
+                ) : (
+                  <>
+                    <Wand2 className="w-4 h-4" />
+                    开始生成
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+        <div className="lg:col-span-2">
+          <ResultGallery
+            generations={generations}
+            tasks={tasks}
+            onRemoveTask={handleRemoveTask}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

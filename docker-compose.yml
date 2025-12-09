@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  sanhub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sanhub
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXTAUTH_URL=https://your-domain.com
+      - NEXTAUTH_SECRET=your-secret-key-here
+      # 禁用 undici body timeout（Sora 视频生成需要较长时间）
+      - UNDICI_NO_BODY_TIMEOUT=1
+      # 数据库配置 (SQLite 或 MySQL)
+      - DB_TYPE=sqlite
+      # MySQL 配置 (如果使用 MySQL)
+      # - DB_TYPE=mysql
+      # - MYSQL_HOST=mysql
+      # - MYSQL_PORT=3306
+      # - MYSQL_USER=sanhub
+      # - MYSQL_PASSWORD=your-password
+      # - MYSQL_DATABASE=sanhub
+      # API Keys (可选，也可在管理后台配置)
+      # - SORA_API_KEY=
+      # - GEMINI_API_KEY=
+      # - ZIMAGE_API_KEY=
+      # - GITEE_API_KEY=
+    volumes:
+      - ./data:/app/data  # SQLite 数据持久化
+
+  # 可选: MySQL 数据库
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: sanhub-mysql
+  #   restart: unless-stopped
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=root-password
+  #     - MYSQL_DATABASE=sanhub
+  #     - MYSQL_USER=sanhub
+  #     - MYSQL_PASSWORD=your-password
+  #   volumes:
+  #     - mysql_data:/var/lib/mysql
+  #   ports:
+  #     - "3306:3306"
+
+# volumes:
+#   mysql_data:

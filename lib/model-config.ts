@@ -1,0 +1,232 @@
+// ========================================
+// 模型配置 - 图像生成和视频生成
+// ========================================
+
+// 图像生成模型配置
+export interface ImageModelConfig {
+  id: string;
+  name: string;
+  description: string;
+  provider: 'gemini' | 'zimage';
+  channel?: 'modelscope' | 'gitee'; // zimage 专用
+  apiModel: string; // 实际调用的模型名称
+  features: {
+    supportReferenceImage: boolean; // 是否支持参考图
+    supportImageSize: boolean; // 是否支持分辨率选择 (1K/2K/4K)
+  };
+  aspectRatios: string[]; // 支持的画面比例
+  resolutions: Record<string, string | Record<string, string>>; // 比例对应的分辨率
+  imageSizes?: string[]; // 支持的分辨率档位 (Pro 专用)
+  defaultAspectRatio: string;
+  defaultImageSize?: string;
+}
+
+// 视频生成模型配置
+export interface VideoModelConfig {
+  id: string;
+  name: string;
+  description: string;
+  provider: 'sora';
+  apiModel: string;
+  features: {
+    supportReferenceFile: boolean; // 是否支持参考素材
+  };
+  aspectRatios: { value: string; label: string; icon: string }[];
+  durations: { value: string; label: string }[];
+  defaultAspectRatio: string;
+  defaultDuration: string;
+}
+
+// ========================================
+// 图像生成模型配置
+// ========================================
+
+export const IMAGE_MODELS: ImageModelConfig[] = [
+  // Gemini Nano (Flash)
+  {
+    id: 'gemini-nano',
+    name: 'Gemini Nano',
+    description: '极速生成',
+    provider: 'gemini',
+    apiModel: 'gemini-2.5-flash-image',
+    features: {
+      supportReferenceImage: true,
+      supportImageSize: false,
+    },
+    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    resolutions: {
+      '1:1': '1024x1024',
+      '2:3': '832x1248',
+      '3:2': '1248x832',
+      '3:4': '864x1184',
+      '4:3': '1184x864',
+      '4:5': '896x1152',
+      '5:4': '1152x896',
+      '9:16': '768x1344',
+      '16:9': '1344x768',
+      '21:9': '1536x672',
+    },
+    defaultAspectRatio: '1:1',
+  },
+  // Gemini Pro
+  {
+    id: 'gemini-pro',
+    name: 'Gemini Pro',
+    description: '4K 高清',
+    provider: 'gemini',
+    apiModel: 'gemini-3-pro-image-preview',
+    features: {
+      supportReferenceImage: true,
+      supportImageSize: true,
+    },
+    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    imageSizes: ['1K', '2K', '4K'],
+    resolutions: {
+      '1K': {
+        '1:1': '1024x1024',
+        '2:3': '848x1264',
+        '3:2': '1264x848',
+        '3:4': '896x1200',
+        '4:3': '1200x896',
+        '4:5': '928x1152',
+        '5:4': '1152x928',
+        '9:16': '768x1376',
+        '16:9': '1376x768',
+        '21:9': '1584x672',
+      },
+      '2K': {
+        '1:1': '2048x2048',
+        '2:3': '1696x2528',
+        '3:2': '2528x1696',
+        '3:4': '1792x2400',
+        '4:3': '2400x1792',
+        '4:5': '1856x2304',
+        '5:4': '2304x1856',
+        '9:16': '1536x2752',
+        '16:9': '2752x1536',
+        '21:9': '3168x1344',
+      },
+      '4K': {
+        '1:1': '4096x4096',
+        '2:3': '3392x5056',
+        '3:2': '5056x3392',
+        '3:4': '3584x4800',
+        '4:3': '4800x3584',
+        '4:5': '3712x4608',
+        '5:4': '4608x3712',
+        '9:16': '3072x5504',
+        '16:9': '5504x3072',
+        '21:9': '6336x2688',
+      },
+    },
+    defaultAspectRatio: '1:1',
+    defaultImageSize: '1K',
+  },
+  // Z-Image Gitee
+  {
+    id: 'zimage-gitee',
+    name: 'Z-Image Gitee',
+    description: '2K 高清',
+    provider: 'zimage',
+    channel: 'gitee',
+    apiModel: 'z-image-turbo',
+    features: {
+      supportReferenceImage: false,
+      supportImageSize: false,
+    },
+    aspectRatios: ['1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'],
+    resolutions: {
+      '1:1': '2048x2048',
+      '4:3': '2048x1536',
+      '3:4': '1536x2048',
+      '3:2': '2048x1360',
+      '2:3': '1360x2048',
+      '16:9': '2048x1152',
+      '9:16': '1152x2048',
+    },
+    defaultAspectRatio: '1:1',
+  },
+  // Z-Image ModelScope
+  {
+    id: 'zimage-modelscope',
+    name: 'Z-Image ModelScope',
+    description: '1K 标准',
+    provider: 'zimage',
+    channel: 'modelscope',
+    apiModel: 'Tongyi-MAI/Z-Image-Turbo',
+    features: {
+      supportReferenceImage: false,
+      supportImageSize: false,
+    },
+    aspectRatios: ['1:1', '1:2', '4:3', '3:4', '16:9', '9:16'],
+    resolutions: {
+      '1:1': '1024x1024',
+      '1:2': '720x1440',
+      '4:3': '1152x864',
+      '3:4': '864x1152',
+      '16:9': '1280x720',
+      '9:16': '720x1280',
+    },
+    defaultAspectRatio: '1:1',
+  },
+];
+
+// ========================================
+// 视频生成模型配置
+// ========================================
+
+export const VIDEO_MODELS: VideoModelConfig[] = [
+  {
+    id: 'sora',
+    name: 'Sora',
+    description: 'OpenAI 视频生成',
+    provider: 'sora',
+    apiModel: 'sora-video',
+    features: {
+      supportReferenceFile: true,
+    },
+    aspectRatios: [
+      { value: 'landscape', label: '16:9', icon: '▬' },
+      { value: 'portrait', label: '9:16', icon: '▮' },
+      { value: 'square', label: '1:1', icon: '■' },
+    ],
+    durations: [
+      { value: '10s', label: '10 秒' },
+      { value: '15s', label: '15 秒' },
+    ],
+    defaultAspectRatio: 'landscape',
+    defaultDuration: '10s',
+  },
+];
+
+// ========================================
+// 辅助函数
+// ========================================
+
+export function getImageModelById(id: string): ImageModelConfig | undefined {
+  return IMAGE_MODELS.find((m) => m.id === id);
+}
+
+export function getVideoModelById(id: string): VideoModelConfig | undefined {
+  return VIDEO_MODELS.find((m) => m.id === id);
+}
+
+// 获取图像模型的当前分辨率
+export function getImageResolution(
+  model: ImageModelConfig,
+  aspectRatio: string,
+  imageSize?: string
+): string {
+  if (model.features.supportImageSize && imageSize && typeof model.resolutions[imageSize] === 'object') {
+    return (model.resolutions[imageSize] as Record<string, string>)[aspectRatio] || '';
+  }
+  return (model.resolutions as Record<string, string>)[aspectRatio] || '';
+}
+
+// 构建 Sora 模型 ID
+export function buildSoraModelId(ratio: string, duration: string): string {
+  let base = 'sora-video';
+  if (ratio !== 'square') base += `-${ratio}`;
+  base += `-${duration}`;
+  return base;
+}

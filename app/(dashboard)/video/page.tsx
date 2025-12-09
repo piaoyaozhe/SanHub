@@ -1,0 +1,702 @@
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSession } from 'next-auth/react';
+import {
+  Video,
+  Upload,
+  Trash2,
+  Sparkles,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  Zap,
+  Wand2,
+  Film,
+  Link as LinkIcon,
+} from 'lucide-react';
+import { cn, fileToBase64 } from '@/lib/utils';
+import { toast } from '@/components/ui/toaster';
+import { ResultGallery, type Task } from '@/components/generator/result-gallery';
+import type { Generation } from '@/types';
+import {
+  VIDEO_MODELS,
+  getVideoModelById,
+  buildSoraModelId,
+} from '@/lib/model-config';
+
+type CreationMode = 'normal' | 'remix' | 'storyboard';
+
+const CREATION_MODES = [
+  { id: 'normal', label: '普通生成', icon: Video, description: '文本/图片生成视频' },
+  { id: 'remix', label: '视频Remix', icon: Wand2, description: '基于已有视频继续创作' },
+  { id: 'storyboard', label: '视频分镜', icon: Film, description: '多镜头分段生成' },
+] as const;
+
+export default function VideoGenerationPage() {
+  const { update } = useSession();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // 创作模式
+  const [creationMode, setCreationMode] = useState<CreationMode>('normal');
+
+  // 模型选择
+  const [selectedModelId, setSelectedModelId] = useState<string>('sora');
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+
+  // 参数状态
+  const [aspectRatio, setAspectRatio] = useState<string>('landscape');
+  const [duration, setDuration] = useState<string>('10s');
+  const [prompt, setPrompt] = useState('');
+  const [files, setFiles] = useState<{ data: string; mimeType: string; preview: string }[]>([]);
+
+  // Remix 模式
+  const [remixUrl, setRemixUrl] = useState('');
+
+  // 分镜模式
+  const [storyboardPrompt, setStoryboardPrompt] = useState('');
+
+  // 任务状态
+  const [generations, setGenerations] = useState<Generation[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  // 全站配额
+  const [quota, setQuota] = useState<{
+    video10sCount: number;
+    video15sCount: number;
+  } | null>(null);
+
+  // 获取当前选中的模型配置
+  const currentModel = getVideoModelById(selectedModelId) || VIDEO_MODELS[0];
+
+
+  // 当模型改变时，重置参数到默认值
+  useEffect(() => {
+    const model = getVideoModelById(selectedModelId);
+    if (model) {
+      setAspectRatio(model.defaultAspectRatio);
+      setDuration(model.defaultDuration);
+      if (!model.features.supportReferenceFile) {
+        setFiles((prev) => {
+          prev.forEach((f) => URL.revokeObjectURL(f.preview));
+          return [];
+        });
+      }
+    }
+  }, [selectedModelId]);
+
+  // 加载全站配额
+  const loadQuota = useCallback(async () => {
+    try {
+      const res = await fetch('/api/sora/quota');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.data) {
+          setQuota(data.data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load quota:', err);
+    }
+  }, []);
+
+  // 轮询任务状态
+  const pollTaskStatus = useCallback(
+    async (taskId: string, taskPrompt: string): Promise<void> => {
+      if (abortControllersRef.current.has(taskId)) return;
+
+      const controller = new AbortController();
+      abortControllersRef.current.set(taskId, controller);
+
+      const maxAttempts = 240;
+      let attempts = 0;
+
+      const poll = async (): Promise<void> => {
+        if (controller.signal.aborted) return;
+
+        if (attempts >= maxAttempts) {
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? { ...t, status: 'failed' as const, errorMessage: '任务超时' }
+                : t
+            )
+          );
+          abortControllersRef.current.delete(taskId);
+          return;
+        }
+
+        attempts++;
+
+        try {
+          const res = await fetch(`/api/generate/status/${taskId}`, {
+            signal: controller.signal,
+          });
+          const data = await res.json();
+
+          if (!res.ok) {
+            throw new Error(data.error || '查询任务状态失败');
+          }
+
+          const status = data.data.status;
+
+          if (status === 'completed') {
+            await update();
+
+            const generation: Generation = {
+              id: data.data.id,
+              userId: '',
+              type: data.data.type,
+              prompt: taskPrompt,
+              params: {},
+              resultUrl: data.data.url,
+              cost: data.data.cost,
+              status: 'completed',
+              createdAt: data.data.createdAt,
+              updatedAt: data.data.updatedAt,
+            };
+
+            setTasks((prev) => prev.filter((t) => t.id !== taskId));
+            setGenerations((prev) => [generation, ...prev]);
+
+            toast({
+              title: '生成成功',
+              description: `消耗 ${data.data.cost} 积分`,
+            });
+
+            abortControllersRef.current.delete(taskId);
+          } else if (status === 'failed') {
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId
+                  ? {
+                      ...t,
+                      status: 'failed' as const,
+                      errorMessage: data.data.errorMessage || '生成失败',
+                    }
+                  : t
+              )
+            );
+            abortControllersRef.current.delete(taskId);
+          } else {
+            setTasks((prev) =>
+              prev.map((t) =>
+                t.id === taskId
+                  ? { ...t, status: status as 'pending' | 'processing' }
+                  : t
+              )
+            );
+            setTimeout(poll, 10000);
+          }
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return;
+          setTasks((prev) =>
+            prev.map((t) =>
+              t.id === taskId
+                ? {
+                    ...t,
+                    status: 'failed' as const,
+                    errorMessage: (err as Error).message,
+                  }
+                : t
+            )
+          );
+          abortControllersRef.current.delete(taskId);
+        }
+      };
+
+      await poll();
+    },
+    [update]
+  );
+
+  // 加载 pending 任务
+  useEffect(() => {
+    const loadPendingTasks = async () => {
+      try {
+        const res = await fetch('/api/user/tasks');
+        if (res.ok) {
+          const data = await res.json();
+          const videoTasks: Task[] = (data.data || [])
+            .filter((t: any) => t.type?.includes('video') || t.type?.includes('sora'))
+            .map((t: any) => ({
+              id: t.id,
+              prompt: t.prompt,
+              type: t.type,
+              status: t.status as 'pending' | 'processing',
+              createdAt: t.createdAt,
+            }));
+
+          if (videoTasks.length > 0) {
+            setTasks(videoTasks);
+            videoTasks.forEach((task) => {
+              pollTaskStatus(task.id, task.prompt);
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load pending tasks:', err);
+      }
+    };
+
+    loadPendingTasks();
+    loadQuota();
+
+    return () => {
+      abortControllersRef.current.forEach((controller) => controller.abort());
+      abortControllersRef.current.clear();
+    };
+  }, [loadQuota, pollTaskStatus]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    for (const file of selectedFiles) {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) continue;
+      const data = await fileToBase64(file);
+      setFiles((prev) => [
+        ...prev,
+        { data, mimeType: file.type, preview: URL.createObjectURL(file) },
+      ]);
+    }
+    e.target.value = '';
+  };
+
+  const clearFiles = () => {
+    files.forEach((f) => URL.revokeObjectURL(f.preview));
+    setFiles([]);
+  };
+
+  const handleRemoveTask = useCallback(async (taskId: string) => {
+    const controller = abortControllersRef.current.get(taskId);
+    if (controller) {
+      controller.abort();
+      abortControllersRef.current.delete(taskId);
+    }
+
+    try {
+      await fetch(`/api/user/tasks/${taskId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('取消任务请求失败:', err);
+    }
+
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  }, []);
+
+  // 构建提示词
+  const buildPrompt = (): string => {
+    switch (creationMode) {
+      case 'remix':
+        if (!remixUrl.trim()) return prompt.trim();
+        return `${remixUrl.trim()} ${prompt.trim()}`.trim();
+      case 'storyboard':
+        return storyboardPrompt.trim();
+      default:
+        return prompt.trim();
+    }
+  };
+
+  // 构建files数组
+  const buildFiles = (): { mimeType: string; data: string }[] => {
+    return files.map((f) => ({ mimeType: f.mimeType, data: f.data }));
+  };
+
+  // 验证输入
+  const validateInput = (): string | null => {
+    switch (creationMode) {
+      case 'remix':
+        if (!remixUrl.trim()) return '请输入视频分享链接或ID';
+        break;
+      case 'storyboard':
+        if (!storyboardPrompt.trim()) return '请输入分镜提示词';
+        if (!storyboardPrompt.includes('[') || !storyboardPrompt.includes(']')) {
+          return '分镜格式错误，请使用 [时长]描述 格式，如 [5.0s]猫猫跳舞';
+        }
+        break;
+      default:
+        if (!prompt.trim() && files.length === 0) return '请输入提示词或上传参考素材';
+    }
+    return null;
+  };
+
+  const handleGenerate = async () => {
+    const validationError = validateInput();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setError('');
+    setSubmitting(true);
+
+    const taskPrompt = buildPrompt();
+    const taskModel = buildSoraModelId(aspectRatio, duration);
+    const taskFiles = buildFiles();
+
+    try {
+      const res = await fetch('/api/generate/sora', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: taskModel,
+          prompt: taskPrompt,
+          files: taskFiles,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || '生成失败');
+      }
+
+      const newTask: Task = {
+        id: data.data.id,
+        prompt: taskPrompt,
+        model: taskModel,
+        type: 'sora-video',
+        status: 'pending',
+        createdAt: Date.now(),
+      };
+      setTasks((prev) => [newTask, ...prev]);
+
+      toast({
+        title: '任务已提交',
+        description: '任务已加入队列，可继续提交新任务',
+      });
+
+      // 清空输入
+      switch (creationMode) {
+        case 'remix':
+          setRemixUrl('');
+          setPrompt('');
+          break;
+        case 'storyboard':
+          setStoryboardPrompt('');
+          break;
+        default:
+          setPrompt('');
+          clearFiles();
+      }
+
+      pollTaskStatus(data.data.id, taskPrompt);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-3xl font-bold">视频生成</h1>
+        <p className="text-muted-foreground mt-1">
+          支持普通生成、Remix、分镜等多种创作模式
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1">
+          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+            {/* Header */}
+            <div className="p-6 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-medium text-white">Sora 视频</h2>
+                  <p className="text-sm text-white/40">AI 视频创作</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Creation Mode Selection */}
+              <div className="space-y-3">
+                <label className="text-sm text-white/50 uppercase tracking-wider">创作模式</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {CREATION_MODES.map((mode) => (
+                    <button
+                      key={mode.id}
+                      onClick={() => setCreationMode(mode.id as CreationMode)}
+                      className={cn(
+                        'flex flex-col items-center gap-2 px-2 py-3 rounded-xl border transition-all',
+                        creationMode === mode.id
+                          ? 'bg-white text-black border-white'
+                          : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      <mode.icon className="w-4 h-4" />
+                      <span className="text-xs font-medium">{mode.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-white/40 text-center">
+                  {CREATION_MODES.find(m => m.id === creationMode)?.description}
+                </p>
+              </div>
+
+              {/* Model Selection */}
+              <div className="space-y-3">
+                <label className="text-sm text-white/50 uppercase tracking-wider">模型</label>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl focus:outline-none focus:border-white/30"
+                  >
+                    <div className="flex flex-col items-start">
+                      <span className="font-medium">{currentModel.name}</span>
+                      <span className="text-xs text-white/50">{currentModel.description}</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showModelDropdown && (
+                    <div className="absolute z-10 w-full mt-1 bg-zinc-900 border border-white/10 rounded-xl shadow-lg overflow-hidden">
+                      {VIDEO_MODELS.map((model) => (
+                        <button
+                          key={model.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModelId(model.id);
+                            setShowModelDropdown(false);
+                          }}
+                          className={`w-full flex flex-col items-start px-4 py-3 hover:bg-white/10 transition-colors ${
+                            selectedModelId === model.id ? 'bg-white/10' : ''
+                          }`}
+                        >
+                          <span className="font-medium text-white">{model.name}</span>
+                          <span className="text-xs text-white/50">{model.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Aspect Ratio */}
+              <div className="space-y-3">
+                <label className="text-sm text-white/50 uppercase tracking-wider">画面比例</label>
+                <div className="grid grid-cols-3 gap-3">
+                  {currentModel.aspectRatios.map((r) => (
+                    <button
+                      key={r.value}
+                      onClick={() => setAspectRatio(r.value)}
+                      className={cn(
+                        'flex flex-col items-center gap-2 px-4 py-4 rounded-xl border transition-all',
+                        aspectRatio === r.value
+                          ? 'bg-white text-black border-white'
+                          : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      <span className="text-lg">{r.icon}</span>
+                      <span className="text-xs font-medium">{r.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Duration */}
+              <div className="space-y-3">
+                <label className="text-sm text-white/50 uppercase tracking-wider">视频时长</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {currentModel.durations.map((d) => (
+                    <button
+                      key={d.value}
+                      onClick={() => setDuration(d.value)}
+                      className={cn(
+                        'px-4 py-3 rounded-xl border transition-all text-sm font-medium',
+                        duration === d.value
+                          ? 'bg-white text-black border-white'
+                          : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mode-specific inputs */}
+              {creationMode === 'normal' && (
+                <>
+                  {currentModel.features.supportReferenceFile && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm text-white/50 uppercase tracking-wider">参考素材</label>
+                        {files.length > 0 && (
+                          <button
+                            onClick={clearFiles}
+                            className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1"
+                          >
+                            <Trash2 className="w-3 h-3" /> 清除
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        multiple
+                        accept="image/*,video/*"
+                        onChange={handleFileUpload}
+                      />
+                      {files.length === 0 ? (
+                        <div
+                          onClick={() => fileInputRef.current?.click()}
+                          className="border border-dashed border-white/20 rounded-xl p-8 text-center cursor-pointer hover:bg-white/5 hover:border-white/30 transition-all"
+                        >
+                          <Upload className="w-8 h-8 mx-auto text-white/30 mb-3" />
+                          <p className="text-sm text-white/50">点击上传图片或视频</p>
+                          <p className="text-xs text-white/30 mt-1">支持 JPG, PNG, MP4</p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-4 gap-2">
+                          {files.map((f, i) => (
+                            <div key={i} className="aspect-square rounded-xl overflow-hidden border border-white/10">
+                              {f.mimeType.startsWith('video') ? (
+                                <video src={f.preview} className="w-full h-full object-cover" />
+                              ) : (
+                                <img src={f.preview} className="w-full h-full object-cover" alt="" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="space-y-3">
+                    <label className="text-sm text-white/50 uppercase tracking-wider">创作描述</label>
+                    <textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="描述你想要生成的内容，越详细效果越好..."
+                      className="w-full h-28 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+
+              {creationMode === 'remix' && (
+                <>
+                  <div className="space-y-3">
+                    <label className="text-sm text-white/50 uppercase tracking-wider flex items-center gap-2">
+                      <LinkIcon className="w-4 h-4" />
+                      视频分享链接
+                    </label>
+                    <input
+                      type="text"
+                      value={remixUrl}
+                      onChange={(e) => setRemixUrl(e.target.value)}
+                      placeholder="https://sora.chatgpt.com/p/s_xxx 或 s_xxx"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                    />
+                    <p className="text-xs text-white/40">
+                      输入 Sora 视频分享链接或ID，基于该视频继续创作
+                    </p>
+                  </div>
+                  <div className="space-y-3">
+                    <label className="text-sm text-white/50 uppercase tracking-wider">修改描述</label>
+                    <textarea
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="描述你想要的修改，如：改成水墨画风格"
+                      className="w-full h-24 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+
+              {creationMode === 'storyboard' && (
+                <div className="space-y-3">
+                  <label className="text-sm text-white/50 uppercase tracking-wider flex items-center gap-2">
+                    <Film className="w-4 h-4" />
+                    分镜脚本
+                  </label>
+                  <textarea
+                    value={storyboardPrompt}
+                    onChange={(e) => setStoryboardPrompt(e.target.value)}
+                    placeholder={`[5.0s]猫猫从飞机上跳伞\n[5.0s]猫猫降落\n[10.0s]猫猫在田野奔跑`}
+                    className="w-full h-36 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm font-mono"
+                  />
+                  <p className="text-xs text-white/40">
+                    格式：[时长]描述，每行一个镜头，如 [5.0s]描述内容
+                  </p>
+                </div>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-400">{error}</p>
+                </div>
+              )}
+
+              {/* Generate Button */}
+              <button
+                onClick={handleGenerate}
+                disabled={submitting}
+                className={cn(
+                  'w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-medium transition-all',
+                  submitting
+                    ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:opacity-90'
+                )}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>提交中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    <span>开始生成</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 space-y-4">
+          {/* 全站剩余配额 */}
+          {quota && (
+            <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-blue-400" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-white/60">全站剩余生成次数</p>
+                  <div className="flex items-center gap-4 mt-1">
+                    <span className="text-white">
+                      <span className="text-lg font-medium text-blue-400">{quota.video10sCount}</span>
+                      <span className="text-white/40 text-sm ml-1">次 10s</span>
+                    </span>
+                    <span className="text-white/20">|</span>
+                    <span className="text-white">
+                      <span className="text-lg font-medium text-purple-400">{quota.video15sCount}</span>
+                      <span className="text-white/40 text-sm ml-1">次 15s</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <ResultGallery
+            generations={generations}
+            tasks={tasks}
+            onRemoveTask={handleRemoveTask}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
