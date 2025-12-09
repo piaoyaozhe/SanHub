@@ -1,30 +1,10 @@
 'use client';
-
-import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Video, Image, MessageSquare, ArrowRight, Wand2, Layers, Palette, Play, Sparkles, Clock, Download, Infinity, Images, Eye, Star, Zap } from 'lucide-react';
+import { Video, Image, MessageSquare, ArrowRight, Wand2, Layers, Palette, Play, Sparkles, Clock, Download, Infinity, Images, Eye, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ParticlesWrapper } from '@/components/ui/particles-wrapper';
 
-interface Quota {
-  video10sCount: number;
-  video15sCount: number;
-}
-
 export default function LandingPage() {
-  const [quota, setQuota] = useState<Quota | null>(null);
-
-  useEffect(() => {
-    // 获取配额
-    fetch('/api/sora/quota')
-      .then(res => res.json())
-      .then(data => {
-        if (data.success && data.data) {
-          setQuota(data.data);
-        }
-      })
-      .catch(console.error);
-  }, []);
 
   return (
     <div className="min-h-screen bg-black text-white relative">
@@ -98,21 +78,6 @@ export default function LandingPage() {
               <Link href="/login">已有账号</Link>
             </Button>
           </div>
-
-          {/* Quota Display */}
-          {quota && (
-            <div className="flex items-center justify-center gap-2 pt-4">
-              <div className="inline-flex items-center gap-3 px-4 py-2 bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-full">
-                <Zap className="w-4 h-4 text-blue-400" />
-                <span className="text-sm text-white/60">全站剩余</span>
-                <span className="text-blue-400 font-medium">{quota.video10sCount}</span>
-                <span className="text-white/40 text-sm">次10s</span>
-                <span className="text-white/20">|</span>
-                <span className="text-purple-400 font-medium">{quota.video15sCount}</span>
-                <span className="text-white/40 text-sm">次15s</span>
-              </div>
-            </div>
-          )}
 
           {/* Stats */}
           <div className="flex items-center justify-center gap-12 pt-8 text-sm">

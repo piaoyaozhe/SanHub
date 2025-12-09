@@ -10,7 +10,6 @@ import {
   Loader2,
   AlertCircle,
   ChevronDown,
-  Zap,
   Wand2,
   Film,
   Link as LinkIcon,
@@ -65,12 +64,6 @@ export default function VideoGenerationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  // 全站配额
-  const [quota, setQuota] = useState<{
-    video10sCount: number;
-    video15sCount: number;
-  } | null>(null);
-
   // 获取当前选中的模型配置
   const currentModel = getVideoModelById(selectedModelId) || VIDEO_MODELS[0];
 
@@ -89,21 +82,6 @@ export default function VideoGenerationPage() {
       }
     }
   }, [selectedModelId]);
-
-  // 加载全站配额
-  const loadQuota = useCallback(async () => {
-    try {
-      const res = await fetch('/api/sora/quota');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.data) {
-          setQuota(data.data);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load quota:', err);
-    }
-  }, []);
 
   // 轮询任务状态
   const pollTaskStatus = useCallback(
@@ -245,13 +223,12 @@ export default function VideoGenerationPage() {
     };
 
     loadPendingTasks();
-    loadQuota();
 
     return () => {
       abortControllersRef.current.forEach((controller) => controller.abort());
       abortControllersRef.current.clear();
     };
-  }, [loadQuota, pollTaskStatus]);
+  }, [pollTaskStatus]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
@@ -446,35 +423,11 @@ export default function VideoGenerationPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">视频生成</h1>
-          <p className="text-muted-foreground mt-1">
-            支持普通生成、Remix、分镜等多种创作模式
-          </p>
-        </div>
-        {/* 全站剩余配额 */}
-        {quota && (
-          <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl px-4 py-3 flex items-center gap-3 shrink-0">
-            <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center">
-              <Zap className="w-4 h-4 text-blue-400" />
-            </div>
-            <div>
-              <p className="text-sm text-white/60">全站剩余生成次数</p>
-              <div className="flex items-center gap-4">
-                <span className="text-white">
-                  <span className="text-lg font-medium text-blue-400">{quota.video10sCount}</span>
-                  <span className="text-white/40 text-sm ml-1">次 10s</span>
-                </span>
-                <span className="text-white/20">|</span>
-                <span className="text-white">
-                  <span className="text-lg font-medium text-purple-400">{quota.video15sCount}</span>
-                  <span className="text-white/40 text-sm ml-1">次 15s</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
+      <div>
+        <h1 className="text-3xl font-bold">视频生成</h1>
+        <p className="text-muted-foreground mt-1">
+          支持普通生成、Remix、分镜等多种创作模式
+        </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
