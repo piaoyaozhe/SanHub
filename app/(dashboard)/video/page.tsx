@@ -391,8 +391,8 @@ export default function VideoGenerationPage() {
 
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold">视频生成</h1>
           <p className="text-muted-foreground mt-1">
@@ -423,33 +423,33 @@ export default function VideoGenerationPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
           <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
             {/* Header */}
-            <div className="p-6 border-b border-white/10">
+            <div className="px-5 py-4 border-b border-white/10">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 text-purple-400" />
+                <div className="w-9 h-9 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-lg flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-medium text-white">Sora 视频</h2>
-                  <p className="text-sm text-white/40">AI 视频创作</p>
+                  <h2 className="text-base font-medium text-white">Sora 视频</h2>
+                  <p className="text-xs text-white/40">AI 视频创作</p>
                 </div>
               </div>
             </div>
 
-            <div className="p-6 space-y-6">
+            <div className="px-5 py-4 space-y-4">
               {/* Creation Mode Selection */}
-              <div className="space-y-3">
-                <label className="text-sm text-white/50 uppercase tracking-wider">创作模式</label>
+              <div className="space-y-2">
+                <label className="text-xs text-white/50 uppercase tracking-wider">创作模式</label>
                 <div className="grid grid-cols-3 gap-2">
                   {CREATION_MODES.map((mode) => (
                     <button
                       key={mode.id}
                       onClick={() => setCreationMode(mode.id as CreationMode)}
                       className={cn(
-                        'flex flex-col items-center gap-2 px-2 py-3 rounded-xl border transition-all',
+                        'flex flex-col items-center gap-1.5 px-2 py-2.5 rounded-lg border transition-all',
                         creationMode === mode.id
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
@@ -460,28 +460,25 @@ export default function VideoGenerationPage() {
                     </button>
                   ))}
                 </div>
-                <p className="text-xs text-white/40 text-center">
-                  {CREATION_MODES.find(m => m.id === creationMode)?.description}
-                </p>
               </div>
 
               {/* Model Selection */}
-              <div className="space-y-3">
-                <label className="text-sm text-white/50 uppercase tracking-wider">模型</label>
+              <div className="space-y-2">
+                <label className="text-xs text-white/50 uppercase tracking-wider">模型</label>
                 <div className="relative">
                   <button
                     type="button"
                     onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    className="w-full flex items-center justify-between px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl focus:outline-none focus:border-white/30"
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg focus:outline-none focus:border-white/30"
                   >
                     <div className="flex flex-col items-start">
-                      <span className="font-medium">{currentModel.name}</span>
+                      <span className="text-sm font-medium">{currentModel.name}</span>
                       <span className="text-xs text-white/50">{currentModel.description}</span>
                     </div>
                     <ChevronDown className={`w-4 h-4 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
                   </button>
                   {showModelDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-zinc-900 border border-white/10 rounded-xl shadow-lg overflow-hidden">
+                    <div className="absolute z-10 w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-lg overflow-hidden">
                       {VIDEO_MODELS.map((model) => (
                         <button
                           key={model.id}
@@ -490,11 +487,11 @@ export default function VideoGenerationPage() {
                             setSelectedModelId(model.id);
                             setShowModelDropdown(false);
                           }}
-                          className={`w-full flex flex-col items-start px-4 py-3 hover:bg-white/10 transition-colors ${
+                          className={`w-full flex flex-col items-start px-3 py-2.5 hover:bg-white/10 transition-colors ${
                             selectedModelId === model.id ? 'bg-white/10' : ''
                           }`}
                         >
-                          <span className="font-medium text-white">{model.name}</span>
+                          <span className="text-sm font-medium text-white">{model.name}</span>
                           <span className="text-xs text-white/50">{model.description}</span>
                         </button>
                       ))}
@@ -504,21 +501,21 @@ export default function VideoGenerationPage() {
               </div>
 
               {/* Aspect Ratio */}
-              <div className="space-y-3">
-                <label className="text-sm text-white/50 uppercase tracking-wider">画面比例</label>
-                <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <label className="text-xs text-white/50 uppercase tracking-wider">画面比例</label>
+                <div className="grid grid-cols-3 gap-2">
                   {currentModel.aspectRatios.map((r) => (
                     <button
                       key={r.value}
                       onClick={() => setAspectRatio(r.value)}
                       className={cn(
-                        'flex flex-col items-center gap-2 px-4 py-4 rounded-xl border transition-all',
+                        'flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border transition-all',
                         aspectRatio === r.value
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
                       )}
                     >
-                      <span className="text-lg">{r.icon}</span>
+                      <span className="text-base">{r.icon}</span>
                       <span className="text-xs font-medium">{r.label}</span>
                     </button>
                   ))}
@@ -526,15 +523,15 @@ export default function VideoGenerationPage() {
               </div>
 
               {/* Duration */}
-              <div className="space-y-3">
-                <label className="text-sm text-white/50 uppercase tracking-wider">视频时长</label>
-                <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-xs text-white/50 uppercase tracking-wider">视频时长</label>
+                <div className="grid grid-cols-2 gap-2">
                   {currentModel.durations.map((d) => (
                     <button
                       key={d.value}
                       onClick={() => setDuration(d.value)}
                       className={cn(
-                        'px-4 py-3 rounded-xl border transition-all text-sm font-medium',
+                        'px-3 py-2.5 rounded-lg border transition-all text-sm font-medium',
                         duration === d.value
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
@@ -550,9 +547,9 @@ export default function VideoGenerationPage() {
               {creationMode === 'normal' && (
                 <>
                   {currentModel.features.supportReferenceFile && (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <label className="text-sm text-white/50 uppercase tracking-wider">参考素材</label>
+                        <label className="text-xs text-white/50 uppercase tracking-wider">参考素材</label>
                         {files.length > 0 && (
                           <button
                             onClick={clearFiles}
@@ -573,16 +570,16 @@ export default function VideoGenerationPage() {
                       {files.length === 0 ? (
                         <div
                           onClick={() => fileInputRef.current?.click()}
-                          className="border border-dashed border-white/20 rounded-xl p-8 text-center cursor-pointer hover:bg-white/5 hover:border-white/30 transition-all"
+                          className="border border-dashed border-white/20 rounded-lg p-5 text-center cursor-pointer hover:bg-white/5 hover:border-white/30 transition-all"
                         >
-                          <Upload className="w-8 h-8 mx-auto text-white/30 mb-3" />
+                          <Upload className="w-6 h-6 mx-auto text-white/30 mb-2" />
                           <p className="text-sm text-white/50">点击上传图片或视频</p>
-                          <p className="text-xs text-white/30 mt-1">支持 JPG, PNG, MP4</p>
+                          <p className="text-xs text-white/30 mt-0.5">支持 JPG, PNG, MP4</p>
                         </div>
                       ) : (
                         <div className="grid grid-cols-4 gap-2">
                           {files.map((f, i) => (
-                            <div key={i} className="aspect-square rounded-xl overflow-hidden border border-white/10">
+                            <div key={i} className="aspect-square rounded-lg overflow-hidden border border-white/10">
                               {f.mimeType.startsWith('video') ? (
                                 <video src={f.preview} className="w-full h-full object-cover" />
                               ) : (
@@ -594,13 +591,13 @@ export default function VideoGenerationPage() {
                       )}
                     </div>
                   )}
-                  <div className="space-y-3">
-                    <label className="text-sm text-white/50 uppercase tracking-wider">创作描述</label>
+                  <div className="space-y-2">
+                    <label className="text-xs text-white/50 uppercase tracking-wider">创作描述</label>
                     <textarea
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
                       placeholder="描述你想要生成的内容，越详细效果越好..."
-                      className="w-full h-28 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                      className="w-full h-20 px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
                     />
                   </div>
                 </>
@@ -608,9 +605,9 @@ export default function VideoGenerationPage() {
 
               {creationMode === 'remix' && (
                 <>
-                  <div className="space-y-3">
-                    <label className="text-sm text-white/50 uppercase tracking-wider flex items-center gap-2">
-                      <LinkIcon className="w-4 h-4" />
+                  <div className="space-y-2">
+                    <label className="text-xs text-white/50 uppercase tracking-wider flex items-center gap-2">
+                      <LinkIcon className="w-3 h-3" />
                       视频分享链接
                     </label>
                     <input
@@ -618,35 +615,35 @@ export default function VideoGenerationPage() {
                       value={remixUrl}
                       onChange={(e) => setRemixUrl(e.target.value)}
                       placeholder="https://sora.chatgpt.com/p/s_xxx 或 s_xxx"
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                      className="w-full px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
                     />
                     <p className="text-xs text-white/40">
                       输入 Sora 视频分享链接或ID，基于该视频继续创作
                     </p>
                   </div>
-                  <div className="space-y-3">
-                    <label className="text-sm text-white/50 uppercase tracking-wider">修改描述</label>
+                  <div className="space-y-2">
+                    <label className="text-xs text-white/50 uppercase tracking-wider">修改描述</label>
                     <textarea
                       value={prompt}
                       onChange={(e) => setPrompt(e.target.value)}
                       placeholder="描述你想要的修改，如：改成水墨画风格"
-                      className="w-full h-24 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
+                      className="w-full h-20 px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
                     />
                   </div>
                 </>
               )}
 
               {creationMode === 'storyboard' && (
-                <div className="space-y-3">
-                  <label className="text-sm text-white/50 uppercase tracking-wider flex items-center gap-2">
-                    <Film className="w-4 h-4" />
+                <div className="space-y-2">
+                  <label className="text-xs text-white/50 uppercase tracking-wider flex items-center gap-2">
+                    <Film className="w-3 h-3" />
                     分镜脚本
                   </label>
                   <textarea
                     value={storyboardPrompt}
                     onChange={(e) => setStoryboardPrompt(e.target.value)}
                     placeholder={`[5.0s]猫猫从飞机上跳伞\n[5.0s]猫猫降落\n[10.0s]猫猫在田野奔跑`}
-                    className="w-full h-36 px-4 py-3 bg-white/5 border border-white/10 text-white rounded-xl resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm font-mono"
+                    className="w-full h-28 px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm font-mono"
                   />
                   <p className="text-xs text-white/40">
                     格式：[时长]描述，每行一个镜头，如 [5.0s]描述内容
@@ -656,8 +653,8 @@ export default function VideoGenerationPage() {
 
               {/* Error */}
               {error && (
-                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                   <p className="text-sm text-red-400">{error}</p>
                 </div>
               )}
@@ -667,7 +664,7 @@ export default function VideoGenerationPage() {
                 onClick={handleGenerate}
                 disabled={submitting}
                 className={cn(
-                  'w-full flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-medium transition-all',
+                  'w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-medium transition-all',
                   submitting
                     ? 'bg-white/10 text-white/50 cursor-not-allowed'
                     : 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:opacity-90'
@@ -675,12 +672,12 @@ export default function VideoGenerationPage() {
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin" />
                     <span>提交中...</span>
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-5 h-5" />
+                    <Sparkles className="w-4 h-4" />
                     <span>开始生成</span>
                   </>
                 )}

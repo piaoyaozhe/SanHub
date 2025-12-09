@@ -7,7 +7,6 @@ import {
   Users, 
   Coins, 
   Settings, 
-  Bot,
   Key,
   ArrowLeft,
   Menu,
@@ -23,7 +22,6 @@ const navItems = [
   { href: '/admin/pricing', label: '积分定价', icon: Coins },
   { href: '/admin/api', label: 'API 配置', icon: Settings },
   { href: '/admin/tokens', label: 'SORA Tokens', icon: Key },
-  { href: '/admin/models', label: '聊天模型', icon: Bot },
   { href: '/admin/announcement', label: '公告管理', icon: Megaphone },
 ];
 
@@ -40,7 +38,7 @@ export function AdminSidebar() {
     <>
       {/* Logo */}
       <div className="p-4 border-b border-white/10">
-        <Link href="/" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors">
+        <Link href="/image" className="flex items-center gap-2 text-white/70 hover:text-white transition-colors">
           <ArrowLeft className="w-4 h-4" />
           <span className="text-sm">返回首页</span>
         </Link>

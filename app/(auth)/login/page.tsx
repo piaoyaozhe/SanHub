@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { signIn } from 'next-auth/react';
+import { useState, useCallback, useEffect } from 'react';
+import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, ArrowRight } from 'lucide-react';
@@ -10,12 +10,20 @@ import { Captcha } from '@/components/ui/captcha';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [captchaId, setCaptchaId] = useState('');
   const [captchaCode, setCaptchaCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // 已登录用户自动跳转
+  useEffect(() => {
+    if (status === 'authenticated' && session) {
+      router.replace('/image');
+    }
+  }, [status, session, router]);
 
   const handleCaptchaChange = useCallback((id: string, code: string) => {
     setCaptchaId(id);
