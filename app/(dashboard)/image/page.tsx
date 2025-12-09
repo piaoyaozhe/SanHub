@@ -11,6 +11,8 @@ import {
   AlertCircle,
   Sparkles,
   ChevronDown,
+  Dices,
+  Info,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -253,18 +255,78 @@ export default function ImageGenerationPage() {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   }, []);
 
-  const handleGenerate = async () => {
-    // Gemini 需要提示词或参考图，ZImage 只需要提示词
+  // 验证输入
+  const validateInput = (): string | null => {
     if (currentModel.provider === 'gemini') {
       if (!prompt.trim() && images.length === 0) {
-        setError('请输入提示词或上传参考图片');
-        return;
+        return '请输入提示词或上传参考图片';
       }
     } else {
       if (!prompt.trim()) {
-        setError('请输入提示词');
-        return;
+        return '请输入提示词';
       }
+    }
+    return null;
+  };
+
+  // 单次提交任务的核心函数
+  const submitSingleTask = async (taskPrompt: string) => {
+    let res: Response;
+    let taskType: string;
+
+    if (currentModel.provider === 'gemini') {
+      res = await fetch('/api/generate/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: currentModel.apiModel,
+          prompt: taskPrompt,
+          aspectRatio,
+          imageSize: currentModel.features.supportImageSize ? imageSize : undefined,
+          images: images.map((img) => ({ mimeType: img.mimeType, data: img.data })),
+        }),
+      });
+      taskType = 'gemini-image';
+    } else {
+      const size = getImageResolution(currentModel, aspectRatio);
+      res = await fetch('/api/generate/zimage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: taskPrompt,
+          model: currentModel.apiModel,
+          size,
+          channel: currentModel.channel,
+          ...(currentModel.channel === 'gitee' && { numInferenceSteps: 9 }),
+        }),
+      });
+      taskType = currentModel.channel === 'gitee' ? 'gitee-image' : 'zimage-image';
+    }
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || '生成失败');
+    }
+
+    const newTask: Task = {
+      id: data.data.id,
+      prompt: taskPrompt,
+      type: taskType,
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+    setTasks((prev) => [newTask, ...prev]);
+    pollTaskStatus(data.data.id, taskPrompt);
+
+    return data.data.id;
+  };
+
+  const handleGenerate = async () => {
+    const validationError = validateInput();
+    if (validationError) {
+      setError(validationError);
+      return;
     }
 
     setError('');
@@ -273,67 +335,47 @@ export default function ImageGenerationPage() {
     const taskPrompt = prompt.trim();
 
     try {
-      let res: Response;
-      let taskType: string;
-
-      if (currentModel.provider === 'gemini') {
-        // Gemini API
-        res = await fetch('/api/generate/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: currentModel.apiModel,
-            prompt: taskPrompt,
-            aspectRatio,
-            imageSize: currentModel.features.supportImageSize ? imageSize : undefined,
-            images: images.map((img) => ({ mimeType: img.mimeType, data: img.data })),
-          }),
-        });
-        taskType = 'gemini-image';
-      } else {
-        // ZImage API
-        const size = getImageResolution(currentModel, aspectRatio);
-        res = await fetch('/api/generate/zimage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            prompt: taskPrompt,
-            model: currentModel.apiModel,
-            size,
-            channel: currentModel.channel,
-            ...(currentModel.channel === 'gitee' && { numInferenceSteps: 9 }),
-          }),
-        });
-        taskType = currentModel.channel === 'gitee' ? 'gitee-image' : 'zimage-image';
-      }
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || '生成失败');
-      }
-
-      // 添加任务
-      const newTask: Task = {
-        id: data.data.id,
-        prompt: taskPrompt,
-        type: taskType,
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-      setTasks((prev) => [newTask, ...prev]);
+      await submitSingleTask(taskPrompt);
 
       toast({
         title: '任务已提交',
         description: '任务已加入队列，可继续提交新任务',
       });
 
-      // 清空输入
       setPrompt('');
       clearImages();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-      // 开始轮询
-      pollTaskStatus(data.data.id, taskPrompt);
+  // 抽卡模式：连续提交3个相同任务
+  const handleGachaMode = async () => {
+    const validationError = validateInput();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setError('');
+    setSubmitting(true);
+
+    const taskPrompt = prompt.trim();
+
+    try {
+      for (let i = 0; i < 3; i++) {
+        await submitSingleTask(taskPrompt);
+      }
+
+      toast({
+        title: '抽卡模式已启动',
+        description: '已提交 3 个相同任务，等待结果中...',
+      });
+
+      setPrompt('');
+      clearImages();
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
     } finally {
@@ -524,24 +566,50 @@ export default function ImageGenerationPage() {
                 </div>
               )}
 
-              {/* Generate Button */}
-              <Button
-                onClick={handleGenerate}
-                disabled={submitting}
-                className="w-full gap-2"
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    提交中...
-                  </>
-                ) : (
-                  <>
-                    <Wand2 className="w-4 h-4" />
-                    开始生成
-                  </>
-                )}
-              </Button>
+              {/* Generate Buttons */}
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleGenerate}
+                  disabled={submitting}
+                  className="flex-1 gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      提交中...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-4 h-4" />
+                      开始生成
+                    </>
+                  )}
+                </Button>
+                <div className="relative group">
+                  <Button
+                    onClick={handleGachaMode}
+                    disabled={submitting}
+                    variant="outline"
+                    className="px-3 bg-gradient-to-r from-amber-500 to-orange-500 border-0 text-white hover:opacity-90 hover:text-white"
+                    title="抽卡模式"
+                  >
+                    <Dices className="w-4 h-4" />
+                  </Button>
+                  <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-20">
+                    <div className="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/80 whitespace-nowrap shadow-lg">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Info className="w-3 h-3 text-amber-400" />
+                        <span className="font-medium text-white">抽卡模式</span>
+                      </div>
+                      <p>一次性提交 3 个相同参数的任务</p>
+                      <p>提高出好图的概率</p>
+                      <div className="absolute bottom-0 right-4 translate-y-full">
+                        <div className="border-8 border-transparent border-t-zinc-800"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

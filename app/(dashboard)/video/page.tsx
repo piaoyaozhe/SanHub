@@ -14,6 +14,8 @@ import {
   Wand2,
   Film,
   Link as LinkIcon,
+  Dices,
+  Info,
 } from 'lucide-react';
 import { cn, fileToBase64 } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -321,6 +323,38 @@ export default function VideoGenerationPage() {
     return null;
   };
 
+  // 单次提交任务的核心函数
+  const submitSingleTask = async (taskPrompt: string, taskModel: string, taskFiles: { mimeType: string; data: string }[]) => {
+    const res = await fetch('/api/generate/sora', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: taskModel,
+        prompt: taskPrompt,
+        files: taskFiles,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || '生成失败');
+    }
+
+    const newTask: Task = {
+      id: data.data.id,
+      prompt: taskPrompt,
+      model: taskModel,
+      type: 'sora-video',
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+    setTasks((prev) => [newTask, ...prev]);
+    pollTaskStatus(data.data.id, taskPrompt);
+
+    return data.data.id;
+  };
+
   const handleGenerate = async () => {
     const validationError = validateInput();
     if (validationError) {
@@ -336,31 +370,7 @@ export default function VideoGenerationPage() {
     const taskFiles = buildFiles();
 
     try {
-      const res = await fetch('/api/generate/sora', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: taskModel,
-          prompt: taskPrompt,
-          files: taskFiles,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || '生成失败');
-      }
-
-      const newTask: Task = {
-        id: data.data.id,
-        prompt: taskPrompt,
-        model: taskModel,
-        type: 'sora-video',
-        status: 'pending',
-        createdAt: Date.now(),
-      };
-      setTasks((prev) => [newTask, ...prev]);
+      await submitSingleTask(taskPrompt, taskModel, taskFiles);
 
       toast({
         title: '任务已提交',
@@ -380,8 +390,52 @@ export default function VideoGenerationPage() {
           setPrompt('');
           clearFiles();
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '生成失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-      pollTaskStatus(data.data.id, taskPrompt);
+  // 抽卡模式：连续提交3个相同任务
+  const handleGachaMode = async () => {
+    const validationError = validateInput();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setError('');
+    setSubmitting(true);
+
+    const taskPrompt = buildPrompt();
+    const taskModel = buildSoraModelId(aspectRatio, duration);
+    const taskFiles = buildFiles();
+
+    try {
+      // 连续提交3个任务
+      for (let i = 0; i < 3; i++) {
+        await submitSingleTask(taskPrompt, taskModel, taskFiles);
+      }
+
+      toast({
+        title: '抽卡模式已启动',
+        description: '已提交 3 个相同任务，等待结果中...',
+      });
+
+      // 清空输入
+      switch (creationMode) {
+        case 'remix':
+          setRemixUrl('');
+          setPrompt('');
+          break;
+        case 'storyboard':
+          setStoryboardPrompt('');
+          break;
+        default:
+          setPrompt('');
+          clearFiles();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '生成失败');
     } finally {
@@ -659,29 +713,59 @@ export default function VideoGenerationPage() {
                 </div>
               )}
 
-              {/* Generate Button */}
-              <button
-                onClick={handleGenerate}
-                disabled={submitting}
-                className={cn(
-                  'w-full flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-medium transition-all',
-                  submitting
-                    ? 'bg-white/10 text-white/50 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:opacity-90'
-                )}
-              >
-                {submitting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>提交中...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    <span>开始生成</span>
-                  </>
-                )}
-              </button>
+              {/* Generate Buttons */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleGenerate}
+                  disabled={submitting}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-medium transition-all',
+                    submitting
+                      ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:opacity-90'
+                  )}
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>提交中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>开始生成</span>
+                    </>
+                  )}
+                </button>
+                <div className="relative group">
+                  <button
+                    onClick={handleGachaMode}
+                    disabled={submitting}
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 px-4 py-3 rounded-lg font-medium transition-all',
+                      submitting
+                        ? 'bg-white/10 text-white/50 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:opacity-90'
+                    )}
+                    title="抽卡模式"
+                  >
+                    <Dices className="w-4 h-4" />
+                  </button>
+                  <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block z-20">
+                    <div className="bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-xs text-white/80 whitespace-nowrap shadow-lg">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <Info className="w-3 h-3 text-amber-400" />
+                        <span className="font-medium text-white">抽卡模式</span>
+                      </div>
+                      <p>一次性提交 3 个相同参数的任务</p>
+                      <p>提高出好图的概率</p>
+                      <div className="absolute bottom-0 right-4 translate-y-full">
+                        <div className="border-8 border-transparent border-t-zinc-800"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
