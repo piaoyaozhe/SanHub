@@ -73,6 +73,7 @@ export default function VideoGenerationPage() {
   const [atSearchQuery, setAtSearchQuery] = useState('');
   const [atCursorPosition, setAtCursorPosition] = useState<number | null>(null);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
+  const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const remixPromptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -712,7 +713,10 @@ export default function VideoGenerationPage() {
                       {characterCards.length > 0 && (
                         <button
                           type="button"
-                          onClick={() => setShowCharacterLibrary(!showCharacterLibrary)}
+                          onClick={() => {
+                            setShowCharacterLibrary(!showCharacterLibrary);
+                            setLibrarySearchQuery('');
+                          }}
                           className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/20 rounded-md hover:from-pink-500/20 hover:to-purple-500/20 transition-all"
                         >
                           <User className="w-3 h-3 text-pink-400" />
@@ -983,11 +987,30 @@ export default function VideoGenerationPage() {
               </div>
             </div>
 
+            {/* Search */}
+            {characterCards.length > 0 && (
+              <div className="px-3 sm:px-4 py-3 border-b border-white/10">
+                <input
+                  type="text"
+                  value={librarySearchQuery}
+                  onChange={(e) => setLibrarySearchQuery(e.target.value)}
+                  placeholder="搜索角色名..."
+                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pink-500/30 transition-colors"
+                />
+              </div>
+            )}
+
             {/* Content */}
             <div className="max-h-[60vh] sm:max-h-96 overflow-y-auto p-3 sm:p-4">
               {characterCards.length > 0 ? (
-                <div className="grid grid-cols-1 gap-2.5">
-                  {characterCards.map((card) => (
+                (() => {
+                  const filtered = characterCards.filter((card) => 
+                    card.characterName.toLowerCase().includes(librarySearchQuery.toLowerCase())
+                  );
+                  
+                  return filtered.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {filtered.map((card) => (
                     <button
                       key={card.id}
                       type="button"
@@ -1014,8 +1037,16 @@ export default function VideoGenerationPage() {
                         <p className="text-xs sm:text-sm text-white/40 mt-0.5">点击添加到描述</p>
                       </div>
                     </button>
-                  ))}
-                </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-4 py-12 text-center">
+                      <User className="w-12 h-12 mx-auto text-white/20 mb-3" />
+                      <p className="text-white/40 text-sm">未找到匹配的角色卡</p>
+                      <p className="text-white/30 text-xs mt-1">尝试其他关键词</p>
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="px-4 py-12 text-center">
                   <User className="w-12 h-12 mx-auto text-white/20 mb-3" />
