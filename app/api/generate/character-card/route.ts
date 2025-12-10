@@ -59,6 +59,7 @@ async function processCharacterCardStream(
   onComplete: (characterName: string) => void,
   onError: (error: string) => void
 ): Promise<void> {
+  let streamClosed = false;
   try {
     // 获取系统配置中的 Sora API 地址和密钥
     const config = await getSystemConfig();
@@ -136,6 +137,7 @@ async function processCharacterCardStream(
             if (parsed.error) {
               const errorMsg = parsed.error.message || 'API 返回错误';
               console.log('[SSE] ERROR detected:', errorMsg);
+              streamClosed = true;
               onError(errorMsg);
               return;
             }
@@ -146,7 +148,7 @@ async function processCharacterCardStream(
               const reasoningContent = choice.delta?.reasoning_content;
               const content = choice.delta?.content;
 
-              if (reasoningContent) {
+              if (reasoningContent && !streamClosed) {
                 onProgress(reasoningContent);
                 // 尝试从 reasoning_content 中提取角色名
                 const extracted = extractCharacterNameFromText(reasoningContent);
@@ -170,6 +172,7 @@ async function processCharacterCardStream(
 
               if (choice.finish_reason === 'STOP' || choice.finish_reason === 'stop') {
                 console.log('[SSE] FINAL characterName:', characterName);
+                streamClosed = true;
                 onComplete(characterName || '未命名角色');
                 return;
               }
@@ -187,12 +190,16 @@ async function processCharacterCardStream(
     console.log('[SSE] Stream ended, characterName:', characterName);
     
     // 如果没有获取到角色名，视为失败
-    if (!characterName) {
+    if (!characterName && !streamClosed) {
+      streamClosed = true;
       onError('角色卡生成失败：未能获取角色名，请重试');
       return;
     }
     
-    onComplete(characterName);
+    if (characterName && !streamClosed) {
+      streamClosed = true;
+      onComplete(characterName);
+    }
   } catch (error) {
     console.error('角色卡生成失败:', error);
     onError(error instanceof Error ? error.message : '生成失败');

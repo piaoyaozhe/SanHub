@@ -100,9 +100,11 @@ export default function VideoGenerationPage() {
         const res = await fetch('/api/user/character-cards');
         if (res.ok) {
           const data = await res.json();
+          console.log('[CharacterCards] Loaded:', data.data);
           const completedCards = (data.data || []).filter(
-            (c: CharacterCard) => c.status === 'completed'
+            (c: CharacterCard) => c.status === 'completed' && c.characterName
           );
+          console.log('[CharacterCards] Filtered completed:', completedCards);
           setCharacterCards(completedCards);
         }
       } catch (err) {
@@ -177,9 +179,13 @@ export default function VideoGenerationPage() {
 
   // 过滤角色卡
   const filteredCharacterCards = characterCards.filter(
-    (card) =>
-      card.characterName.toLowerCase().includes(atSearchQuery) ||
-      atSearchQuery === ''
+    (card) => {
+      const match = card.characterName.toLowerCase().includes(atSearchQuery) || atSearchQuery === '';
+      if (atSearchQuery) {
+        console.log(`[Search] "${card.characterName}" vs "${atSearchQuery}": ${match}`);
+      }
+      return match;
+    }
   );
 
   // 轮询任务状态
