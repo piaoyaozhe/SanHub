@@ -6,6 +6,7 @@ import { History, Download, Maximize2, X, Loader2, Play, Image, Video, Palette, 
 import { toast } from '@/components/ui/toaster';
 import type { Generation, CharacterCard } from '@/types';
 import { formatDate, truncate } from '@/lib/utils';
+import { downloadAsset } from '@/lib/download';
 
 // 任务类型
 interface Task {
@@ -350,13 +351,27 @@ export default function HistoryPage() {
     await poll();
   }, [update]);
 
-  const downloadFile = (url: string, id: string, type: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `sanhub-${id}.${type.includes('video') ? 'mp4' : 'png'}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const downloadFile = async (url: string, id: string, type: string) => {
+    if (!url) {
+      toast({
+        title: '下载失败',
+        description: '文件地址不存在',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const extension = type.includes('video') ? 'mp4' : 'png';
+    try {
+      await downloadAsset(url, `sanhub-${id}.${extension}`);
+    } catch (err) {
+      console.error('Download failed', err);
+      toast({
+        title: '下载失败',
+        description: '请稍后重试',
+        variant: 'destructive',
+      });
+    }
   };
 
   // 删除媒体文件

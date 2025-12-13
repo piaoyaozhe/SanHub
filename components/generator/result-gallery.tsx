@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { Download, Maximize2, X, Play, Image, Sparkles, Loader2, AlertCircle } from 'lucide-react';
 import type { Generation } from '@/types';
 import { formatDate, truncate } from '@/lib/utils';
+import { downloadAsset } from '@/lib/download';
+import { toast } from '@/components/ui/toaster';
 
 // 任务类型
 export interface Task {
@@ -27,13 +29,27 @@ interface ResultGalleryProps {
 export function ResultGallery({ generations, tasks = [], onRemoveTask }: ResultGalleryProps) {
   const [selected, setSelected] = useState<Generation | null>(null);
 
-  const downloadFile = (url: string, id: string, type: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `sanhub-${id}.${type.includes('video') ? 'mp4' : 'png'}`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const downloadFile = async (url: string, id: string, type: string) => {
+    if (!url) {
+      toast({
+        title: '下载失败',
+        description: '文件地址不存在',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const extension = type.includes('video') ? 'mp4' : 'png';
+    try {
+      await downloadAsset(url, `sanhub-${id}.${extension}`);
+    } catch (err) {
+      console.error('Download failed', err);
+      toast({
+        title: '下载失败',
+        description: '请稍后重试',
+        variant: 'destructive',
+      });
+    }
   };
 
   const isVideo = (gen: Generation) => gen.type.includes('video');
