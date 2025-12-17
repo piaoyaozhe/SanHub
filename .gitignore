@@ -101,6 +101,7 @@ Desktop.ini
 *.txt
 *.sql
 *.gz
+json.json
 # ===================
 # Deployment
 # ===================
