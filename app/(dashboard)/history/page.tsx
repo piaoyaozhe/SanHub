@@ -75,12 +75,19 @@ function CollapsibleText({
 }) {
   const [expanded, setExpanded] = useState(false);
 
+  const collapsedClassName = useMemo(() => {
+    if (collapsedLines === 1) return 'line-clamp-1';
+    if (collapsedLines === 2) return 'line-clamp-2';
+    if (collapsedLines === 4) return 'line-clamp-4';
+    if (collapsedLines === 5) return 'line-clamp-5';
+    if (collapsedLines === 6) return 'line-clamp-6';
+    return 'line-clamp-3';
+  }, [collapsedLines]);
+
   return (
     <div className="min-w-0">
       <div
-        className={`text-white text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 ${
-          expanded ? '' : `line-clamp-${collapsedLines}`
-        }`}
+        className={`text-white text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 ${expanded ? '' : collapsedClassName}`}
       >
         {text}
       </div>
