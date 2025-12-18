@@ -66,6 +66,49 @@ const SkeletonCard = () => (
   </div>
 );
 
+function CollapsibleText({
+  text,
+  collapsedLines = 3,
+}: {
+  text: string;
+  collapsedLines?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="min-w-0">
+      <div
+        className={`text-white text-sm leading-relaxed whitespace-pre-wrap break-words min-w-0 ${
+          expanded ? '' : `line-clamp-${collapsedLines}`
+        }`}
+      >
+        {text}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="text-xs text-white/50 hover:text-white/80 hover:underline underline-offset-4 transition-colors"
+          type="button"
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(text);
+            toast({ title: '已复制提示词' });
+          }}
+          className="inline-flex items-center gap-1 text-xs text-white/50 hover:text-white/80 transition-colors"
+          title="复制提示词"
+          type="button"
+        >
+          <Copy className="w-3.5 h-3.5" />
+          复制
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Memoized 卡片组件 - 避免不必要的重渲染
 interface GenerationCardProps {
   gen: Generation;
@@ -845,19 +888,13 @@ export default function HistoryPage() {
               <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start gap-2">
-                    <p className="text-white text-sm leading-relaxed truncate md:whitespace-normal flex-1">{truncate(selected.prompt || '无提示词', 150)}</p>
-                    {selected.prompt && (
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(selected.prompt);
-                          toast({ title: '已复制提示词' });
-                        }}
-                        className="shrink-0 p-1.5 text-white/40 hover:text-white/80 hover:bg-white/10 rounded-lg transition-colors"
-                        title="复制提示词"
-                      >
-                        <Copy className="w-4 h-4" />
-                      </button>
-                    )}
+                    <div className="flex-1 min-w-0">
+                      {selected.prompt ? (
+                        <CollapsibleText text={selected.prompt} collapsedLines={3} />
+                      ) : (
+                        <p className="text-white text-sm leading-relaxed">无提示词</p>
+                      )}
+                    </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-2">
                     <span className="text-white/40 text-xs">{formatDate(selected.createdAt)}</span>
