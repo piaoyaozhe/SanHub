@@ -1,36 +1,66 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { User, Eye, Ban, Check, Search, Edit2, Key, Coins, History } from 'lucide-react';
 import type { SafeUser, Generation } from '@/types';
 import { formatBalance, formatDate, cn } from '@/lib/utils';
 
+const USERS_PAGE_SIZE = 50;
+
 export default function UsersPage() {
   const [users, setUsers] = useState<SafeUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
   const [selectedUser, setSelectedUser] = useState<SafeUser | null>(null);
   const [userGenerations, setUserGenerations] = useState<Generation[]>([]);
   const [editMode, setEditMode] = useState<'password' | 'balance' | null>(null);
   const [editValue, setEditValue] = useState('');
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async (nextPage = 1, append = false) => {
     try {
-      const res = await fetch('/api/admin/users');
+      if (append) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+      }
+
+      const params = new URLSearchParams();
+      params.set('page', String(nextPage));
+      params.set('limit', String(USERS_PAGE_SIZE));
+      const term = search.trim();
+      if (term) {
+        params.set('q', term);
+      }
+
+      const res = await fetch(`/api/admin/users?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
-        setUsers(data.data || []);
+        const nextUsers = data.data || [];
+        setUsers((prev) => (append ? [...prev, ...nextUsers] : nextUsers));
+        setPage(data.page || nextPage);
+        setHasMore(Boolean(data.hasMore));
+        if (!append) {
+          setSelectedUser(null);
+          setUserGenerations([]);
+        }
       }
     } catch (err) {
       console.error('加载用户失败:', err);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  };
+  }, [search]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      loadUsers(1, false);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [loadUsers]);
 
   const selectUser = async (user: SafeUser) => {
     setSelectedUser(user);
@@ -88,11 +118,6 @@ export default function UsersPage() {
     updateUser({ balance });
   };
 
-  const filteredUsers = users.filter(u => 
-    u.email.toLowerCase().includes(search.toLowerCase()) ||
-    u.name.toLowerCase().includes(search.toLowerCase())
-  );
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -122,7 +147,7 @@ export default function UsersPage() {
           </div>
 
           <div className="space-y-2 max-h-[600px] overflow-y-auto">
-            {filteredUsers.map(user => (
+            {users.map(user => (
               <div 
                 key={user.id}
                 className={cn(
@@ -152,6 +177,15 @@ export default function UsersPage() {
               </div>
             ))}
           </div>
+          {hasMore && (
+            <button
+              onClick={() => loadUsers(page + 1, true)}
+              disabled={loadingMore}
+              className="w-full mt-3 px-4 py-2 bg-white/10 text-white rounded-lg text-sm font-medium hover:bg-white/20 disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading...' : 'Load more'}
+            </button>
+          )}
         </div>
 
         {/* 用户详情 */}

@@ -2,6 +2,7 @@ import type { User, Generation, SystemConfig, SafeUser, PricingConfig, ChatModel
 import { generateId } from './utils';
 import bcrypt from 'bcryptjs';
 import { createDatabaseAdapter, type DatabaseAdapter } from './db-adapter';
+import { cache, CacheKeys, CacheTTL, withCache } from './cache';
 
 // ========================================
 // 数据库连接（支持 SQLite �?MySQL�?
@@ -529,13 +530,30 @@ export async function updateUserBalance(id: string, delta: number): Promise<numb
   return newBalance;
 }
 
-export async function getAllUsers(): Promise<SafeUser[]> {
+export async function getAllUsers(options: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+} = {}): Promise<SafeUser[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const limit = Math.max(options.limit ?? 200, 1);
+  const offset = Math.max(options.offset ?? 0, 0);
+  const search = options.search?.trim();
 
-  const [rows] = await db.execute(
-    'SELECT id, email, name, role, balance, disabled, created_at FROM users ORDER BY created_at DESC'
-  );
+  let sql = 'SELECT id, email, name, role, balance, disabled, created_at FROM users';
+  const params: unknown[] = [];
+
+  if (search) {
+    sql += ' WHERE email LIKE ? OR name LIKE ?';
+    const term = `%${search}%`;
+    params.push(term, term);
+  }
+
+  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+  params.push(limit, offset);
+
+  const [rows] = await db.execute(sql, params);
 
   return (rows as any[]).map((row) => ({
     id: row.id,
@@ -546,6 +564,25 @@ export async function getAllUsers(): Promise<SafeUser[]> {
     disabled: Boolean(row.disabled),
     createdAt: Number(row.created_at),
   }));
+}
+
+export async function getUsersCount(search?: string): Promise<number> {
+  await initializeDatabase();
+  const db = getAdapter();
+  const term = search?.trim();
+
+  let sql = 'SELECT COUNT(1) as count FROM users';
+  const params: unknown[] = [];
+
+  if (term) {
+    sql += ' WHERE email LIKE ? OR name LIKE ?';
+    const like = `%${term}%`;
+    params.push(like, like);
+  }
+
+  const [rows] = await db.execute(sql, params);
+  const row = (rows as any[])[0];
+  return Number(row?.count || 0);
 }
 
 export async function deleteUser(id: string): Promise<boolean> {
@@ -660,13 +697,14 @@ export async function getUserGenerations(
 }
 
 // 获取用户正在进行的任务（pending 或 processing）
-export async function getPendingGenerations(userId: string): Promise<Generation[]> {
+export async function getPendingGenerations(userId: string, limit = 50): Promise<Generation[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(limit, 1);
 
   const [rows] = await db.execute(
-    `SELECT * FROM generations WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC`,
-    [userId]
+    `SELECT * FROM generations WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ?`,
+    [userId, safeLimit]
   );
 
   return (rows as any[]).map((row) => ({
@@ -757,82 +795,84 @@ export async function deleteAllUserGenerations(userId: string): Promise<number> 
 
 export async function getSystemConfig(): Promise<SystemConfig> {
   await initializeDatabase();
-  const db = getAdapter();
+  return withCache(CacheKeys.SYSTEM_CONFIG, CacheTTL.SYSTEM_CONFIG, async () => {
+    const db = getAdapter();
 
-  const [rows] = await db.execute('SELECT * FROM system_config WHERE id = 1');
-  const configs = rows as any[];
+    const [rows] = await db.execute('SELECT * FROM system_config WHERE id = 1');
+    const configs = rows as any[];
 
-  if (configs.length === 0) {
-    // 返回默认配置
+    if (configs.length === 0) {
+      // 返回默认配置
+      return {
+        soraApiKey: process.env.SORA_API_KEY || '',
+        soraBaseUrl: process.env.SORA_BASE_URL || 'http://localhost:8000',
+        soraBackendUrl: '',
+        soraBackendUsername: '',
+        soraBackendPassword: '',
+        soraBackendToken: '',
+        geminiApiKey: process.env.GEMINI_API_KEY || '',
+        geminiBaseUrl: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com',
+        zimageApiKey: process.env.ZIMAGE_API_KEY || '',
+        zimageBaseUrl: process.env.ZIMAGE_BASE_URL || 'https://api-inference.modelscope.cn/',
+        giteeApiKey: process.env.GITEE_API_KEY || '',
+        giteeBaseUrl: process.env.GITEE_BASE_URL || 'https://ai.gitee.com/',
+        picuiApiKey: process.env.PICUI_API_KEY || '',
+        picuiBaseUrl: process.env.PICUI_BASE_URL || 'https://picui.cn/api/v1',
+        pricing: {
+          soraVideo10s: 100,
+          soraVideo15s: 150,
+          soraImage: 50,
+          geminiNano: 10,
+          geminiPro: 30,
+          zimageImage: 30,
+          giteeImage: 30,
+        },
+        registerEnabled: true,
+        defaultBalance: 100,
+        announcement: {
+          title: '',
+          content: '',
+          enabled: false,
+          updatedAt: 0,
+        },
+      };
+    }
+
+    const row = configs[0];
     return {
-      soraApiKey: process.env.SORA_API_KEY || '',
-      soraBaseUrl: process.env.SORA_BASE_URL || 'http://localhost:8000',
-      soraBackendUrl: '',
-      soraBackendUsername: '',
-      soraBackendPassword: '',
-      soraBackendToken: '',
-      geminiApiKey: process.env.GEMINI_API_KEY || '',
-      geminiBaseUrl: process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com',
-      zimageApiKey: process.env.ZIMAGE_API_KEY || '',
-      zimageBaseUrl: process.env.ZIMAGE_BASE_URL || 'https://api-inference.modelscope.cn/',
-      giteeApiKey: process.env.GITEE_API_KEY || '',
-      giteeBaseUrl: process.env.GITEE_BASE_URL || 'https://ai.gitee.com/',
-      picuiApiKey: process.env.PICUI_API_KEY || '',
-      picuiBaseUrl: process.env.PICUI_BASE_URL || 'https://picui.cn/api/v1',
+      soraApiKey: row.sora_api_key || '',
+      soraBaseUrl: row.sora_base_url || 'http://localhost:8000',
+      soraBackendUrl: row.sora_backend_url || '',
+      soraBackendUsername: row.sora_backend_username || '',
+      soraBackendPassword: row.sora_backend_password || '',
+      soraBackendToken: row.sora_backend_token || '',
+      geminiApiKey: row.gemini_api_key || '',
+      geminiBaseUrl: row.gemini_base_url || 'https://generativelanguage.googleapis.com',
+      zimageApiKey: row.zimage_api_key || '',
+      zimageBaseUrl: row.zimage_base_url || 'https://api-inference.modelscope.cn/',
+      giteeApiKey: row.gitee_api_key || '',
+      giteeBaseUrl: row.gitee_base_url || 'https://ai.gitee.com/',
+      picuiApiKey: row.picui_api_key || '',
+      picuiBaseUrl: row.picui_base_url || 'https://picui.cn/api/v1',
       pricing: {
-        soraVideo10s: 100,
-        soraVideo15s: 150,
-        soraImage: 50,
-        geminiNano: 10,
-        geminiPro: 30,
-        zimageImage: 30,
-        giteeImage: 30,
+        soraVideo10s: row.pricing_sora_video_10s || 100,
+        soraVideo15s: row.pricing_sora_video_15s || 150,
+        soraImage: row.pricing_sora_image || 50,
+        geminiNano: row.pricing_gemini_nano || 10,
+        geminiPro: row.pricing_gemini_pro || 30,
+        zimageImage: row.pricing_zimage_image || 30,
+        giteeImage: row.pricing_gitee_image || 30,
       },
-      registerEnabled: true,
-      defaultBalance: 100,
+      registerEnabled: Boolean(row.register_enabled),
+      defaultBalance: row.default_balance || 100,
       announcement: {
-        title: '',
-        content: '',
-        enabled: false,
-        updatedAt: 0,
+        title: row.announcement_title || '',
+        content: row.announcement_content || '',
+        enabled: Boolean(row.announcement_enabled),
+        updatedAt: Number(row.announcement_updated_at) || 0,
       },
     };
-  }
-
-  const row = configs[0];
-  return {
-    soraApiKey: row.sora_api_key || '',
-    soraBaseUrl: row.sora_base_url || 'http://localhost:8000',
-    soraBackendUrl: row.sora_backend_url || '',
-    soraBackendUsername: row.sora_backend_username || '',
-    soraBackendPassword: row.sora_backend_password || '',
-    soraBackendToken: row.sora_backend_token || '',
-    geminiApiKey: row.gemini_api_key || '',
-    geminiBaseUrl: row.gemini_base_url || 'https://generativelanguage.googleapis.com',
-    zimageApiKey: row.zimage_api_key || '',
-    zimageBaseUrl: row.zimage_base_url || 'https://api-inference.modelscope.cn/',
-    giteeApiKey: row.gitee_api_key || '',
-    giteeBaseUrl: row.gitee_base_url || 'https://ai.gitee.com/',
-    picuiApiKey: row.picui_api_key || '',
-    picuiBaseUrl: row.picui_base_url || 'https://picui.cn/api/v1',
-    pricing: {
-      soraVideo10s: row.pricing_sora_video_10s || 100,
-      soraVideo15s: row.pricing_sora_video_15s || 150,
-      soraImage: row.pricing_sora_image || 50,
-      geminiNano: row.pricing_gemini_nano || 10,
-      geminiPro: row.pricing_gemini_pro || 30,
-      zimageImage: row.pricing_zimage_image || 30,
-      giteeImage: row.pricing_gitee_image || 30,
-    },
-    registerEnabled: Boolean(row.register_enabled),
-    defaultBalance: row.default_balance || 100,
-    announcement: {
-      title: row.announcement_title || '',
-      content: row.announcement_content || '',
-      enabled: Boolean(row.announcement_enabled),
-      updatedAt: Number(row.announcement_updated_at) || 0,
-    },
-  };
+  });
 }
 
 export async function updateSystemConfig(
@@ -963,6 +1003,7 @@ export async function updateSystemConfig(
       `UPDATE system_config SET ${fields.join(', ')} WHERE id = 1`,
       values
     );
+    cache.delete(CacheKeys.SYSTEM_CONFIG);
   }
 
   return getSystemConfig();
@@ -1234,11 +1275,11 @@ export async function getSessionContext(sessionId: string, maxTokens = 128000): 
     if (totalTokens + msg.tokenCount > targetTokens && result.length > 0) {
       break;
     }
-    result.unshift(msg);
+    result.push(msg);
     totalTokens += msg.tokenCount;
   }
 
-  return result;
+  return result.reverse();
 }
 
 export async function deleteSessionMessages(sessionId: string): Promise<boolean> {
@@ -1370,13 +1411,14 @@ export async function getUserCharacterCards(
   }));
 }
 
-export async function getPendingCharacterCards(userId: string): Promise<CharacterCard[]> {
+export async function getPendingCharacterCards(userId: string, limit = 50): Promise<CharacterCard[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(limit, 1);
 
   const [rows] = await db.execute(
-    `SELECT * FROM character_cards WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC`,
-    [userId]
+    `SELECT * FROM character_cards WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ?`,
+    [userId, safeLimit]
   );
 
   return (rows as any[]).map((row) => ({

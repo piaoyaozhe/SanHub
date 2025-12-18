@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { promises as fsp } from 'fs';
 import path from 'path';
 import { uploadToPicUI } from './picui';
 
@@ -11,10 +12,8 @@ const DATA_DIR = process.env.DATA_DIR || './data';
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 
 // 确保目录存在
-function ensureMediaDir(): void {
-  if (!fs.existsSync(MEDIA_DIR)) {
-    fs.mkdirSync(MEDIA_DIR, { recursive: true });
-  }
+async function ensureMediaDir(): Promise<void> {
+  await fsp.mkdir(MEDIA_DIR, { recursive: true });
 }
 
 // 从 data URL 中提取 mime 类型和数据
@@ -42,12 +41,12 @@ function getExtension(mimeType: string): string {
 }
 
 /**
- * 保存 base64 数据为文件（同步版本，不支持 PicUI）
+ * 保存 base64 数据为文件（async version，不支持 PicUI）
  * @param id 唯一标识符（通常是 generation ID）
  * @param dataUrl base64 data URL
  * @returns 文件的相对路径（用于存储到数据库）或原始 data URL（如果禁用文件存储）
  */
-export function saveMediaToFile(id: string, dataUrl: string): string {
+export async function saveMediaToFile(id: string, dataUrl: string): Promise<string> {
   // 如果不是 data URL，直接返回（可能是外部 URL）
   if (!dataUrl.startsWith('data:')) {
     return dataUrl;
@@ -66,7 +65,7 @@ export function saveMediaToFile(id: string, dataUrl: string): string {
   }
 
   try {
-    ensureMediaDir();
+    await ensureMediaDir();
 
     const ext = getExtension(parsed.mimeType);
     const filename = `${id}.${ext}`;
@@ -74,7 +73,7 @@ export function saveMediaToFile(id: string, dataUrl: string): string {
 
     // 将 base64 转换为 Buffer 并写入文件
     const buffer = Buffer.from(parsed.data, 'base64');
-    fs.writeFileSync(filepath, buffer);
+    await fsp.writeFile(filepath, buffer);
 
     console.log(`[MediaStorage] Saved: ${filename} (${(buffer.length / 1024).toFixed(1)} KB)`);
 
@@ -111,7 +110,7 @@ export async function saveMediaAsync(id: string, dataUrl: string): Promise<strin
   }
 
   // 回退到本地文件存储
-  return saveMediaToFile(id, dataUrl);
+  return await saveMediaToFile(id, dataUrl);
 }
 
 /**
@@ -119,7 +118,9 @@ export async function saveMediaAsync(id: string, dataUrl: string): Promise<strin
  * @param identifier 文件标识符（file:xxx.png 格式）或完整路径
  * @returns { buffer, mimeType } 或 null
  */
-export function readMediaFile(identifier: string): { buffer: Buffer; mimeType: string } | null {
+export async function readMediaFile(
+  identifier: string
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
     let filename: string;
 
@@ -132,11 +133,7 @@ export function readMediaFile(identifier: string): { buffer: Buffer; mimeType: s
 
     const filepath = path.join(MEDIA_DIR, filename);
 
-    if (!fs.existsSync(filepath)) {
-      return null;
-    }
-
-    const buffer = fs.readFileSync(filepath);
+    const buffer = await fsp.readFile(filepath);
     const ext = path.extname(filename).slice(1).toLowerCase();
 
     const mimeTypes: Record<string, string> = {
@@ -153,6 +150,9 @@ export function readMediaFile(identifier: string): { buffer: Buffer; mimeType: s
 
     return { buffer, mimeType };
   } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
     console.error('[MediaStorage] Failed to read file:', error);
     return null;
   }

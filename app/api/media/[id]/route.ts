@@ -29,7 +29,7 @@ export async function GET(
     
     // 1. 本地文件存储 (file:xxx.png)
     if (isLocalFile(resultUrl)) {
-      const file = readMediaFile(resultUrl);
+      const file = await readMediaFile(resultUrl);
       if (!file) {
         return new NextResponse('File not found', { status: 404 });
       }

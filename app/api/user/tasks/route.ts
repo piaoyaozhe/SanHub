@@ -1,11 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getPendingGenerations } from '@/lib/db';
 import type { Generation } from '@/types';
 
 // 获取用户正在进行的任务
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
 
@@ -13,7 +13,10 @@ export async function GET() {
       return NextResponse.json({ error: '未登录' }, { status: 401 });
     }
 
-    const tasks = await getPendingGenerations(session.user.id);
+    const searchParams = request.nextUrl.searchParams;
+    const rawLimit = parseInt(searchParams.get('limit') || '50');
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 200);
+    const tasks = await getPendingGenerations(session.user.id, limit);
 
     return NextResponse.json({
       data: tasks.map((t: Generation) => ({

@@ -13,14 +13,16 @@ export async function GET(request: NextRequest) {
 
     // 支持分页
     const searchParams = request.nextUrl.searchParams;
-    const page = parseInt(searchParams.get('page') || '1');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 100);
+    const rawPage = parseInt(searchParams.get('page') || '1');
+    const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
+    const rawLimit = parseInt(searchParams.get('limit') || '50');
+    const limit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 50, 1), 100);
     const offset = (page - 1) * limit;
     const pendingOnly = searchParams.get('pending') === 'true';
 
     let cards;
     if (pendingOnly) {
-      cards = await getPendingCharacterCards(session.user.id);
+      cards = await getPendingCharacterCards(session.user.id, limit);
     } else {
       cards = await getUserCharacterCards(session.user.id, limit, offset);
     }
