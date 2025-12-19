@@ -1,6 +1,5 @@
 import { getSystemConfig } from './db';
 import { uploadToPicUI } from './picui';
-import { FormData, File } from 'undici';
 import type { ZImageGenerateRequest, GenerateResult } from '@/types';
 
 // ========================================
@@ -328,8 +327,8 @@ async function generateWithGiteeUpscale(
     const mimeType = parsed?.mimeType || input.mimeType || 'application/octet-stream';
     const base64Data = parsed?.data || input.data;
     const buffer = Buffer.from(base64Data, 'base64');
-    const file = new File([buffer], 'input.jpg', { type: mimeType });
-    formData.append('image', file);
+    const blob = new Blob([buffer], { type: mimeType });
+    formData.append('image', blob, 'input.jpg');
     return formData;
   };
 
