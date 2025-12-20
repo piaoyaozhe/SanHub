@@ -9,6 +9,27 @@ import type { GeminiGenerateRequest } from '@/types';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
+async function fetchImageAsBase64(
+  imageUrl: string,
+  origin: string
+): Promise<{ mimeType: string; data: string }> {
+  const resolvedUrl = imageUrl.startsWith('/')
+    ? new URL(imageUrl, origin).toString()
+    : imageUrl;
+  const response = await fetch(resolvedUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`参考图下载失败 (${response.status})`);
+  }
+  const contentType = response.headers.get('content-type') || 'image/png';
+  const arrayBuffer = await response.arrayBuffer();
+  const data = Buffer.from(arrayBuffer).toString('base64');
+  return { mimeType: contentType, data };
+}
+
 // 后台处理任务
 async function processGenerationTask(
   generationId: string,
@@ -53,8 +74,18 @@ export async function POST(request: NextRequest) {
     }
 
     const body: GeminiGenerateRequest = await request.json();
+    const origin = new URL(request.url).origin;
+    const normalizedBody: GeminiGenerateRequest = {
+      ...body,
+      images: Array.isArray(body.images) ? [...body.images] : [],
+    };
 
-    if (!body.prompt && (!body.images || body.images.length === 0)) {
+    if (body.referenceImageUrl) {
+      const ref = await fetchImageAsBase64(body.referenceImageUrl, origin);
+      normalizedBody.images?.push({ mimeType: ref.mimeType, data: ref.data });
+    }
+
+    if (!normalizedBody.prompt && (!normalizedBody.images || normalizedBody.images.length === 0)) {
       return NextResponse.json(
         { error: '请输入提示词或上传参考图片' },
         { status: 400 }
@@ -67,7 +98,7 @@ export async function POST(request: NextRequest) {
     }
 
     const config = await getSystemConfig();
-    const estimatedCost = body.model.includes('pro')
+    const estimatedCost = normalizedBody.model.includes('pro')
       ? config.pricing.geminiPro
       : config.pricing.geminiNano;
 
@@ -81,18 +112,18 @@ export async function POST(request: NextRequest) {
     const generation = await saveGeneration({
       userId: user.id,
       type: 'gemini-image',
-      prompt: body.prompt,
+      prompt: normalizedBody.prompt,
       params: {
-        model: body.model,
-        aspectRatio: body.aspectRatio,
-        imageSize: body.imageSize,
+        model: normalizedBody.model,
+        aspectRatio: normalizedBody.aspectRatio,
+        imageSize: normalizedBody.imageSize,
       },
       resultUrl: '',
       cost: estimatedCost,
       status: 'pending',
     });
 
-    processGenerationTask(generation.id, user.id, body).catch((err) => {
+    processGenerationTask(generation.id, user.id, normalizedBody).catch((err) => {
       console.error('[API] Gemini 后台任务启动失败:', err);
     });
 

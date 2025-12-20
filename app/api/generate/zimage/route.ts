@@ -9,6 +9,27 @@ import type { ZImageGenerateRequest, GenerationType } from '@/types';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
+async function fetchImageAsBase64(
+  imageUrl: string,
+  origin: string
+): Promise<{ mimeType: string; data: string }> {
+  const resolvedUrl = imageUrl.startsWith('/')
+    ? new URL(imageUrl, origin).toString()
+    : imageUrl;
+  const response = await fetch(resolvedUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`参考图下载失败 (${response.status})`);
+  }
+  const contentType = response.headers.get('content-type') || 'image/png';
+  const arrayBuffer = await response.arrayBuffer();
+  const data = Buffer.from(arrayBuffer).toString('base64');
+  return { mimeType: contentType, data };
+}
+
 // 后台处理任务
 async function processGenerationTask(
   generationId: string,
@@ -67,7 +88,13 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { prompt, model, size, loras, channel, numInferenceSteps, images } = body;
+    const { prompt, model, size, loras, channel, numInferenceSteps, images, referenceImageUrl } = body;
+    const origin = new URL(req.url).origin;
+    const imageList = Array.isArray(images) ? [...images] : [];
+    if (referenceImageUrl) {
+      const ref = await fetchImageAsBase64(referenceImageUrl, origin);
+      imageList.push({ mimeType: ref.mimeType, data: `data:${ref.mimeType};base64,${ref.data}` });
+    }
     const isGitee = channel === 'gitee';
     const modelId = model || (isGitee ? 'z-image-turbo' : 'Tongyi-MAI/Z-Image-Turbo');
 
@@ -92,7 +119,6 @@ export async function POST(req: NextRequest) {
     }
 
     // 构建请求
-    const imageList = Array.isArray(images) ? images : [];
     const requiresReference = modelId === 'Qwen/Qwen-Image-Edit-2509' || modelId === 'SeedVR2-3B' || modelId === 'RMBG-2.0';
     if (requiresReference && imageList.length === 0) {
       return NextResponse.json(

@@ -9,6 +9,24 @@ import type { SoraGenerateRequest } from '@/types';
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
+async function fetchImageAsBase64(imageUrl: string, origin: string): Promise<{ mimeType: string; data: string }> {
+  const resolvedUrl = imageUrl.startsWith('/')
+    ? new URL(imageUrl, origin).toString()
+    : imageUrl;
+  const response = await fetch(resolvedUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`参考图下载失败 (${response.status})`);
+  }
+  const contentType = response.headers.get('content-type') || 'image/png';
+  const arrayBuffer = await response.arrayBuffer();
+  const data = Buffer.from(arrayBuffer).toString('base64');
+  return { mimeType: contentType, data };
+}
+
 // 后台处理任务
 async function processGenerationTask(
   generationId: string,
@@ -81,12 +99,26 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SoraGenerateRequest = await request.json();
+    const hasPrompt = Boolean(body.prompt && body.prompt.trim());
+    const hasFiles = Boolean(body.files && body.files.length > 0);
+    const hasReferenceUrl = Boolean(body.referenceImageUrl);
 
-    if (!body.prompt && (!body.files || body.files.length === 0)) {
+    if (!hasPrompt && !hasFiles && !hasReferenceUrl) {
       return NextResponse.json(
         { error: '请输入提示词或上传参考文件' },
         { status: 400 }
       );
+    }
+
+    const origin = new URL(request.url).origin;
+    const normalizedBody: SoraGenerateRequest = {
+      ...body,
+      files: body.files ? [...body.files] : [],
+    };
+
+    if (body.referenceImageUrl) {
+      const file = await fetchImageAsBase64(body.referenceImageUrl, origin);
+      normalizedBody.files?.push(file);
     }
 
     // 获取最新用户信息
@@ -116,7 +148,7 @@ export async function POST(request: NextRequest) {
     const generation = await saveGeneration({
       userId: user.id,
       type,
-      prompt: body.prompt,
+      prompt: body.prompt || '',
       params: { model: body.model },
       resultUrl: '',
       cost: estimatedCost,
@@ -124,7 +156,7 @@ export async function POST(request: NextRequest) {
     });
 
     // 在后台异步处理（不等待完成）
-    processGenerationTask(generation.id, user.id, body).catch((err) => {
+    processGenerationTask(generation.id, user.id, normalizedBody).catch((err) => {
       console.error('[API] 后台任务启动失败:', err);
     });
 

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { LogOut, Settings, Menu, X, Video, Image, History, Shield, MessageSquare } from 'lucide-react';
+import { LogOut, Settings, Menu, X, Video, Image, History, Shield, MessageSquare, Workflow } from 'lucide-react';
 import type { SafeUser } from '@/types';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +19,7 @@ export function Header({ user }: HeaderProps) {
   const navItems = [
     { href: '/image', icon: Image, label: '图像生成' },
     { href: '/video', icon: Video, label: '视频生成' },
+    { href: '/workspace', icon: Workflow, label: '工作空间' },
     // { href: '/chat', icon: MessageSquare, label: 'Chat' },
     { href: '/history', icon: History, label: '历史' },
     { href: '/settings', icon: Settings, label: '设置' },

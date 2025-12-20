@@ -22,6 +22,7 @@ node_modules/
 CHANGELOG.md
 API_README.md
 OPENAI_API.md
+AGENTS.md
 # ===================
 # Testing
 # ===================
@@ -35,7 +36,7 @@ OPENAI_API.md
 .env.local
 .env.*.local
 !.env.example
-
+AGENTS.md
 # ===================
 # Database
 # ===================

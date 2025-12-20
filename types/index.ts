@@ -177,6 +177,7 @@ export interface SoraGenerateRequest {
   prompt: string;
   model: string; // sora-video-landscape-10s, sora-image 等
   files?: { mimeType: string; data: string }[];
+  referenceImageUrl?: string;
   style_id?: string; // 风格: festive, retro, news, selfie, handheld, anime, comic, golden, vintage
   remix_target_id?: string; // Remix 视频 ID
 }
@@ -188,6 +189,7 @@ export interface GeminiGenerateRequest {
   aspectRatio: string;
   imageSize?: string;
   images?: { mimeType: string; data: string }[];
+  referenceImageUrl?: string;
 }
 
 // Z-Image 生成请求
@@ -201,6 +203,7 @@ export interface ZImageGenerateRequest {
   numInferenceSteps?: number; // Gitee 推理步数
   outscale?: number; // 超分倍率
   outputFormat?: string; // 输出格式
+  referenceImageUrl?: string;
 }
 
 // 生成结果
@@ -236,6 +239,58 @@ export interface CharacterCard {
   sourceVideoUrl?: string; // 源视频 URL (可选)
   status: 'pending' | 'processing' | 'completed' | 'failed';
   errorMessage?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ========================================
+// Workspace types
+// ========================================
+
+export type WorkspaceNodeType = 'image' | 'video';
+
+export interface WorkspaceNode {
+  id: string;
+  type: WorkspaceNodeType;
+  name: string;
+  position: { x: number; y: number };
+  data: {
+    modelId: string;
+    aspectRatio?: string;
+    duration?: string;
+    imageSize?: string;
+    prompt: string;
+    outputUrl?: string;
+    outputType?: 'image' | 'video';
+    generationId?: string;
+    status?: 'idle' | 'pending' | 'processing' | 'completed' | 'failed';
+    errorMessage?: string;
+  };
+}
+
+export interface WorkspaceEdge {
+  id: string;
+  from: string;
+  to: string;
+}
+
+export interface WorkspaceData {
+  nodes: WorkspaceNode[];
+  edges: WorkspaceEdge[];
+}
+
+export interface Workspace {
+  id: string;
+  userId: string;
+  name: string;
+  data: WorkspaceData;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
   createdAt: number;
   updatedAt: number;
 }

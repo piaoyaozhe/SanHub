@@ -12,6 +12,28 @@ interface SoraImageRequest {
   model?: string;
   size?: string;
   input_image?: string;
+  referenceImageUrl?: string;
+}
+
+async function fetchImageAsBase64(
+  imageUrl: string,
+  origin: string
+): Promise<{ mimeType: string; data: string }> {
+  const resolvedUrl = imageUrl.startsWith('/')
+    ? new URL(imageUrl, origin).toString()
+    : imageUrl;
+  const response = await fetch(resolvedUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`参考图下载失败 (${response.status})`);
+  }
+  const contentType = response.headers.get('content-type') || 'image/png';
+  const arrayBuffer = await response.arrayBuffer();
+  const data = Buffer.from(arrayBuffer).toString('base64');
+  return { mimeType: contentType, data };
 }
 
 // 后台处理任务
@@ -69,8 +91,15 @@ export async function POST(request: NextRequest) {
     }
 
     const body: SoraImageRequest = await request.json();
+    const origin = new URL(request.url).origin;
+    const normalizedBody: SoraImageRequest = { ...body };
 
-    if (!body.prompt) {
+    if (body.referenceImageUrl && !body.input_image) {
+      const file = await fetchImageAsBase64(body.referenceImageUrl, origin);
+      normalizedBody.input_image = file.data;
+    }
+
+    if (!normalizedBody.prompt) {
       return NextResponse.json(
         { error: '请输入提示词' },
         { status: 400 }
@@ -95,17 +124,17 @@ export async function POST(request: NextRequest) {
     const generation = await saveGeneration({
       userId: user.id,
       type: 'sora-image',
-      prompt: body.prompt,
+      prompt: normalizedBody.prompt,
       params: {
-        model: body.model,
-        size: body.size,
+        model: normalizedBody.model,
+        size: normalizedBody.size,
       },
       resultUrl: '',
       cost: estimatedCost,
       status: 'pending',
     });
 
-    processGenerationTask(generation.id, user.id, body).catch((err) => {
+    processGenerationTask(generation.id, user.id, normalizedBody).catch((err) => {
       console.error('[API] Sora Image 后台任务启动失败:', err);
     });
 
