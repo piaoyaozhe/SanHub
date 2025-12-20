@@ -1517,7 +1517,8 @@ export default function WorkspaceEditorPage() {
                     )}
 
                     {/* Upload reference image for video - only when no connected image node */}
-                    {node.type === 'video' && incoming.length === 0 && (
+                    {/* Upload reference image for video - only when no connected image node */}
+                    {node.type === 'video' && !incoming.some(e => nodes.find(n => n.id === e.from)?.type === 'image') && (
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase tracking-wider text-white/40">参考图 (1张)</label>
                         <div className="flex flex-wrap gap-1">
@@ -1593,8 +1594,8 @@ export default function WorkspaceEditorPage() {
                       </div>
                     )}
 
-                    {/* Upload reference images - only for image nodes without connected input */}
-                    {node.type === 'image' && model && (model as typeof IMAGE_MODELS[number]).features.supportReferenceImage && incoming.length === 0 && (
+                    {/* Upload reference images - only for image nodes without connected image node */}
+                    {node.type === 'image' && model && (model as typeof IMAGE_MODELS[number]).features.supportReferenceImage && !incoming.some(e => nodes.find(n => n.id === e.from)?.type === 'image') && (
                       <div className="space-y-1">
                         <label className="text-[10px] uppercase tracking-wider text-white/40">
                           参考图 {(model.features as { supportMultipleImages?: boolean }).supportMultipleImages ? '(可多张)' : '(1张)'}
