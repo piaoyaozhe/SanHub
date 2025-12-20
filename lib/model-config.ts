@@ -16,6 +16,7 @@ export interface ImageModelConfig {
   features: {
     supportReferenceImage: boolean; // 是否支持参考图
     supportImageSize: boolean; // 是否支持分辨率选择 (1K/2K/4K)
+    supportMultipleImages?: boolean; // 是否支持多张参考图
   };
   aspectRatios: string[]; // 支持的画面比例
   resolutions: Record<string, string | Record<string, string>>; // 比例对应的分辨率
@@ -74,6 +75,7 @@ export const IMAGE_MODELS: ImageModelConfig[] = [
     features: {
       supportReferenceImage: true,
       supportImageSize: false,
+      supportMultipleImages: true,
     },
     aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
     resolutions: {
@@ -100,6 +102,7 @@ export const IMAGE_MODELS: ImageModelConfig[] = [
     features: {
       supportReferenceImage: true,
       supportImageSize: true,
+      supportMultipleImages: true,
     },
     aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
     imageSizes: ['1K', '2K', '4K'],

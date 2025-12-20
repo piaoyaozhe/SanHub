@@ -376,6 +376,7 @@ export interface WorkspaceNode {
     outputType?: 'image' | 'video';
     generationId?: string;
     revisedPrompt?: string;
+    uploadedImages?: string[]; // User uploaded reference images (base64 or URLs)
     
     // Chat node fields
     chatModelId?: string;

@@ -635,15 +635,30 @@ export default function WorkspaceEditorPage() {
         const imageInputNode = imageInputEdge
           ? nodesRef.current.find((n) => n.id === imageInputEdge.from && n.type === 'image')
           : undefined;
-        const referenceImageUrl = model.features.supportReferenceImage
-          ? imageInputNode?.data.outputUrl
-          : undefined;
+        
+        // Use connected image output, or uploaded images if no connection
+        let referenceImageUrl: string | undefined;
+        let referenceImages: string[] | undefined;
+        
+        if (model.features.supportReferenceImage) {
+          if (imageInputNode?.data.outputUrl) {
+            // Use connected node's output
+            referenceImageUrl = imageInputNode.data.outputUrl;
+          } else if (node.data.uploadedImages && node.data.uploadedImages.length > 0) {
+            // Use uploaded images
+            if ((model.features as { supportMultipleImages?: boolean }).supportMultipleImages) {
+              referenceImages = node.data.uploadedImages;
+            } else {
+              referenceImageUrl = node.data.uploadedImages[0];
+            }
+          }
+        }
 
-        if (inputEdge && model.features.supportReferenceImage && !referenceImageUrl) {
+        if (imageInputEdge && model.features.supportReferenceImage && !referenceImageUrl && !referenceImages) {
           updateNodeData(node.id, { errorMessage: '请先生成上游图片', status: 'failed' });
           return;
         }
-        if (model.requiresReferenceImage && !referenceImageUrl) {
+        if (model.requiresReferenceImage && !referenceImageUrl && !referenceImages) {
           updateNodeData(node.id, { errorMessage: '该模型需要参考图', status: 'failed' });
           return;
         }
@@ -672,16 +687,22 @@ export default function WorkspaceEditorPage() {
             body: JSON.stringify(payload),
           });
         } else if (model.provider === 'gemini') {
+          const geminiPayload: Record<string, unknown> = {
+            model: model.apiModel,
+            prompt: basePrompt,
+            aspectRatio: node.data.aspectRatio || model.defaultAspectRatio,
+            imageSize: model.features.supportImageSize ? node.data.imageSize : undefined,
+          };
+          // Gemini supports multiple images
+          if (referenceImages && referenceImages.length > 0) {
+            geminiPayload.referenceImages = referenceImages;
+          } else if (referenceImageUrl) {
+            geminiPayload.referenceImageUrl = referenceImageUrl;
+          }
           res = await fetch('/api/generate/gemini', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: model.apiModel,
-              prompt: basePrompt,
-              aspectRatio: node.data.aspectRatio || model.defaultAspectRatio,
-              imageSize: model.features.supportImageSize ? node.data.imageSize : undefined,
-              ...(referenceImageUrl ? { referenceImageUrl } : {}),
-            }),
+            body: JSON.stringify(geminiPayload),
           });
         } else {
           const size = getImageResolution(model, node.data.aspectRatio || model.defaultAspectRatio);
@@ -1522,6 +1543,59 @@ export default function WorkspaceEditorPage() {
                               </span>
                             );
                           })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Upload reference images - only for image nodes without connected input */}
+                    {node.type === 'image' && model && (model as typeof IMAGE_MODELS[number]).features.supportReferenceImage && incoming.length === 0 && (
+                      <div className="space-y-1">
+                        <label className="text-[10px] uppercase tracking-wider text-white/40">
+                          参考图 {(model.features as { supportMultipleImages?: boolean }).supportMultipleImages ? '(可多张)' : '(1张)'}
+                        </label>
+                        <div className="flex flex-wrap gap-1">
+                          {(node.data.uploadedImages || []).map((img, idx) => (
+                            <div key={idx} className="relative group">
+                              <img src={img} alt="" className="w-12 h-12 rounded object-cover border border-white/10" />
+                              <button
+                                onClick={() => {
+                                  const newImages = [...(node.data.uploadedImages || [])];
+                                  newImages.splice(idx, 1);
+                                  updateNodeData(node.id, { uploadedImages: newImages });
+                                }}
+                                className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <label className="w-12 h-12 rounded border border-dashed border-white/20 flex items-center justify-center cursor-pointer hover:border-white/40 transition">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple={!!(model.features as { supportMultipleImages?: boolean }).supportMultipleImages}
+                              className="hidden"
+                              onChange={async (e) => {
+                                const files = Array.from(e.target.files || []);
+                                if (files.length === 0) return;
+                                const supportsMultiple = !!(model.features as { supportMultipleImages?: boolean }).supportMultipleImages;
+                                const maxImages = supportsMultiple ? 10 : 1;
+                                const currentImages = node.data.uploadedImages || [];
+                                const newImages: string[] = [];
+                                for (const file of files.slice(0, maxImages - currentImages.length)) {
+                                  const base64 = await new Promise<string>((resolve) => {
+                                    const reader = new FileReader();
+                                    reader.onload = () => resolve(reader.result as string);
+                                    reader.readAsDataURL(file);
+                                  });
+                                  newImages.push(base64);
+                                }
+                                updateNodeData(node.id, { uploadedImages: [...currentImages, ...newImages].slice(0, maxImages) });
+                                e.target.value = '';
+                              }}
+                            />
+                            <ImageIcon className="w-4 h-4 text-white/30" />
+                          </label>
                         </div>
                       </div>
                     )}

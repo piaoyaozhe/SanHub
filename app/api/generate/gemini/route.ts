@@ -73,16 +73,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '请先登录' }, { status: 401 });
     }
 
-    const body: GeminiGenerateRequest = await request.json();
+    const body: GeminiGenerateRequest & { referenceImages?: string[] } = await request.json();
     const origin = new URL(request.url).origin;
     const normalizedBody: GeminiGenerateRequest = {
       ...body,
       images: Array.isArray(body.images) ? [...body.images] : [],
     };
 
+    // Handle single reference image URL
     if (body.referenceImageUrl) {
       const ref = await fetchImageAsBase64(body.referenceImageUrl, origin);
       normalizedBody.images?.push({ mimeType: ref.mimeType, data: ref.data });
+    }
+
+    // Handle multiple reference images (base64 or URLs)
+    if (body.referenceImages && body.referenceImages.length > 0) {
+      for (const img of body.referenceImages) {
+        if (img.startsWith('data:')) {
+          // Base64 data URL
+          const match = img.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            normalizedBody.images?.push({ mimeType: match[1], data: match[2] });
+          }
+        } else {
+          // URL - fetch and convert
+          const ref = await fetchImageAsBase64(img, origin);
+          normalizedBody.images?.push({ mimeType: ref.mimeType, data: ref.data });
+        }
+      }
     }
 
     if (!normalizedBody.prompt && (!normalizedBody.images || normalizedBody.images.length === 0)) {
