@@ -27,6 +27,7 @@ import {
   getImageResolution,
   getVideoModelById,
   ImageModelConfig,
+  VideoModelConfig,
 } from '@/lib/model-config';
 import type { CharacterCard, WorkspaceData, WorkspaceEdge, WorkspaceNode, WorkspaceNodeType } from '@/types';
 
@@ -1008,7 +1009,7 @@ export default function WorkspaceEditorPage() {
                           <select
                             value={node.data.imageSize || (model as ImageModelConfig).defaultImageSize || '1K'}
                             onChange={(e) => updateNodeData(node.id, { imageSize: e.target.value })}
-                            disabled={!model.features.supportImageSize}
+                            disabled={!(model as ImageModelConfig).features.supportImageSize}
                             className="w-full px-2 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-white/30 disabled:opacity-40"
                           >
                             {(model as typeof IMAGE_MODELS[number]).imageSizes?.map((size) => (
@@ -1026,7 +1027,7 @@ export default function WorkspaceEditorPage() {
                         <div className="space-y-1">
                           <label className="text-[10px] uppercase tracking-wider text-white/40">时长</label>
                           <select
-                            value={node.data.duration || model.defaultDuration}
+                            value={node.data.duration || (model as VideoModelConfig).defaultDuration}
                             onChange={(e) => updateNodeData(node.id, { duration: e.target.value })}
                             className="w-full px-2 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-white/30"
                           >
