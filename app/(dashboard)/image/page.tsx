@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useSession } from 'next-auth/react';
 import {
-  Image,
   Upload,
   Trash2,
   Wand2,
@@ -22,12 +21,34 @@ import {
   IMAGE_MODELS,
   getImageModelById,
   getImageResolution,
+  filterImageModelsByChannel,
 } from '@/lib/model-config';
+import type { ChannelEnabledConfig, DailyLimitConfig } from '@/types';
+
+// 每日使用量类型
+interface DailyUsage {
+  imageCount: number;
+  videoCount: number;
+  characterCardCount: number;
+}
 
 export default function ImageGenerationPage() {
   const { update } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // 渠道启用状态
+  const [channelEnabled, setChannelEnabled] = useState<ChannelEnabledConfig>({
+    sora: true,
+    gemini: true,
+    zimage: true,
+    gitee: true,
+  });
+  const [channelLoaded, setChannelLoaded] = useState(false);
+
+  // 每日限制
+  const [dailyUsage, setDailyUsage] = useState<DailyUsage>({ imageCount: 0, videoCount: 0, characterCardCount: 0 });
+  const [dailyLimits, setDailyLimits] = useState<DailyLimitConfig>({ imageLimit: 0, videoLimit: 0, characterCardLimit: 0 });
 
   // 模型选择
   const [selectedModelId, setSelectedModelId] = useState<string>('gemini-nano');
@@ -45,8 +66,56 @@ export default function ImageGenerationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  // 过滤后的可用模型
+  const availableModels = filterImageModelsByChannel(IMAGE_MODELS, channelEnabled);
+
   // 获取当前选中的模型配置
-  const currentModel = getImageModelById(selectedModelId) || IMAGE_MODELS[0];
+  const currentModel = getImageModelById(selectedModelId) || availableModels[0];
+
+  // 加载渠道配置
+  useEffect(() => {
+    const loadChannels = async () => {
+      try {
+        const res = await fetch('/api/channels');
+        if (res.ok) {
+          const data = await res.json();
+          setChannelEnabled(data.data);
+        }
+      } catch (err) {
+        console.error('Failed to load channels:', err);
+      } finally {
+        setChannelLoaded(true);
+      }
+    };
+    loadChannels();
+  }, []);
+
+  // 加载每日使用量
+  useEffect(() => {
+    const loadDailyUsage = async () => {
+      try {
+        const res = await fetch('/api/user/daily-usage');
+        if (res.ok) {
+          const data = await res.json();
+          setDailyUsage(data.data.usage);
+          setDailyLimits(data.data.limits);
+        }
+      } catch (err) {
+        console.error('Failed to load daily usage:', err);
+      }
+    };
+    loadDailyUsage();
+  }, []);
+
+  // 当渠道配置加载完成后，检查当前选中的模型是否可用
+  useEffect(() => {
+    if (channelLoaded && availableModels.length > 0) {
+      const isCurrentModelAvailable = availableModels.some(m => m.id === selectedModelId);
+      if (!isCurrentModelAvailable) {
+        setSelectedModelId(availableModels[0].id);
+      }
+    }
+  }, [channelLoaded, availableModels, selectedModelId]);
 
   // 当模型改变时，重置参数到默认值
   useEffect(() => {
@@ -253,8 +322,15 @@ export default function ImageGenerationPage() {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   }, []);
 
+  // 检查是否达到每日限制
+  const isImageLimitReached = dailyLimits.imageLimit > 0 && dailyUsage.imageCount >= dailyLimits.imageLimit;
+
   // 验证输入
   const validateInput = (): string | null => {
+    // 检查每日限制
+    if (isImageLimitReached) {
+      return `今日图像生成次数已达上限 (${dailyLimits.imageLimit} 次)`;
+    }
     if (currentModel.requiresReferenceImage && images.length === 0) {
       return '请上传参考图';
     }
@@ -362,6 +438,9 @@ export default function ImageGenerationPage() {
         description: '任务已加入队列，可继续提交新任务',
       });
 
+      // 更新今日使用量
+      setDailyUsage(prev => ({ ...prev, imageCount: prev.imageCount + 1 }));
+
       setPrompt('');
       clearImages();
     } catch (err) {
@@ -394,6 +473,9 @@ export default function ImageGenerationPage() {
         description: '已提交 3 个相同任务，等待结果中...',
       });
 
+      // 更新今日使用量
+      setDailyUsage(prev => ({ ...prev, imageCount: prev.imageCount + 3 }));
+
       setPrompt('');
       clearImages();
     } catch (err) {
@@ -410,16 +492,47 @@ export default function ImageGenerationPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-extralight text-white">图像生成</h1>
-        <p className="text-white/50 mt-1 font-light">
-          选择模型，生成高质量图像
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-extralight text-white">图像生成</h1>
+          <p className="text-white/50 mt-1 font-light">
+            选择模型，生成高质量图像
+          </p>
+        </div>
+        {dailyLimits.imageLimit > 0 && (
+          <div className={cn(
+            "px-4 py-2 rounded-xl border text-sm",
+            isImageLimitReached
+              ? "bg-red-500/10 border-red-500/30 text-red-400"
+              : "bg-white/5 border-white/10 text-white/60"
+          )}>
+            今日: {dailyUsage.imageCount} / {dailyLimits.imageLimit}
+          </div>
+        )}
       </div>
+
+      {/* 无可用模型提示 */}
+      {channelLoaded && availableModels.length === 0 && (
+        <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
+          <p className="text-sm text-yellow-200">所有图像生成渠道已被管理员禁用</p>
+        </div>
+      )}
+
+      {/* 每日限制达到提示 */}
+      {isImageLimitReached && (
+        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+          <p className="text-sm text-red-300">今日图像生成次数已达上限，请明天再试</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1">
-          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm">
+          <div className={cn(
+            "bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm",
+            (availableModels.length === 0 || isImageLimitReached) && "opacity-50 pointer-events-none"
+          )}>
             <div className="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-blue-500/5 to-purple-500/5">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-lg flex items-center justify-center">
@@ -456,7 +569,7 @@ export default function ImageGenerationPage() {
                   </button>
                   {showModelDropdown && (
                     <div className="absolute z-50 w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-xl max-h-72 overflow-y-auto">
-                      {IMAGE_MODELS.map((model) => (
+                      {availableModels.map((model) => (
                         <button
                           key={model.id}
                           type="button"
@@ -484,6 +597,11 @@ export default function ImageGenerationPage() {
                           </span>
                         </button>
                       ))}
+                      {availableModels.length === 0 && (
+                        <div className="px-3 py-4 text-center text-white/40 text-sm">
+                          暂无可用模型
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

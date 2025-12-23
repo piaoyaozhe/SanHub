@@ -21,14 +21,12 @@ export default async function AdminLayout({
   }
 
   return (
-    <div className="min-h-screen bg-black relative overflow-hidden">
+    <div className="min-h-screen bg-black relative">
       <DashboardBackgroundWrapper />
-      <div className="flex relative z-10 min-h-screen">
+      <div className="flex relative z-10">
         <AdminSidebar />
-        <main className="flex-1 p-6 lg:p-8 overflow-auto">
-          <div className="h-full">
-            {children}
-          </div>
+        <main className="flex-1 p-6 lg:p-8 min-h-screen">
+          {children}
         </main>
       </div>
     </div>

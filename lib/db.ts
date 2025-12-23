@@ -347,6 +347,45 @@ export async function initializeDatabase(): Promise<void> {
     // 字段已存在，忽略错误
   }
 
+  // 添加渠道启用配置字段（如果不存在）
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN channel_sora_enabled TINYINT(1) DEFAULT 1");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN channel_gemini_enabled TINYINT(1) DEFAULT 1");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN channel_zimage_enabled TINYINT(1) DEFAULT 1");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN channel_gitee_enabled TINYINT(1) DEFAULT 1");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+
+  // 添加每日请求限制配置字段
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN daily_limit_image INT DEFAULT 0");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN daily_limit_video INT DEFAULT 0");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute("ALTER TABLE system_config ADD COLUMN daily_limit_character_card INT DEFAULT 0");
+  } catch {
+    // 字段已存在，忽略错误
+  }
+
   // 更新 generations 表的 type 字段以支持 gitee-image（MySQL 需要修改 ENUM）
   if (dbType === 'mysql') {
     try {
@@ -817,6 +856,53 @@ export async function deleteAllUserGenerations(userId: string): Promise<number> 
   return (result as any).affectedRows || 0;
 }
 
+// 获取用户今日使用量统计
+export interface DailyUsageStats {
+  imageCount: number;
+  videoCount: number;
+  characterCardCount: number;
+}
+
+export async function getUserDailyUsage(userId: string): Promise<DailyUsageStats> {
+  await initializeDatabase();
+  const db = getAdapter();
+
+  // 获取今天 0 点的时间戳
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+
+  // 统计今日图像生成数量（包括 pending/processing/completed）
+  const [imageRows] = await db.execute(
+    `SELECT COUNT(1) as count FROM generations 
+     WHERE user_id = ? AND created_at >= ? 
+     AND type IN ('sora-image', 'gemini-image', 'zimage-image', 'gitee-image')
+     AND status != 'cancelled'`,
+    [userId, todayStart]
+  );
+  const imageCount = Number((imageRows as any[])[0]?.count || 0);
+
+  // 统计今日视频生成数量
+  const [videoRows] = await db.execute(
+    `SELECT COUNT(1) as count FROM generations 
+     WHERE user_id = ? AND created_at >= ? 
+     AND type = 'sora-video'
+     AND status != 'cancelled'`,
+    [userId, todayStart]
+  );
+  const videoCount = Number((videoRows as any[])[0]?.count || 0);
+
+  // 统计今日角色卡生成数量
+  const [cardRows] = await db.execute(
+    `SELECT COUNT(1) as count FROM character_cards 
+     WHERE user_id = ? AND created_at >= ?
+     AND status != 'cancelled'`,
+    [userId, todayStart]
+  );
+  const characterCardCount = Number((cardRows as any[])[0]?.count || 0);
+
+  return { imageCount, videoCount, characterCardCount };
+}
+
 // ========================================
 // 系统配置操作
 // ========================================
@@ -864,6 +950,17 @@ export async function getSystemConfig(): Promise<SystemConfig> {
           enabled: false,
           updatedAt: 0,
         },
+        channelEnabled: {
+          sora: true,
+          gemini: true,
+          zimage: true,
+          gitee: true,
+        },
+        dailyLimit: {
+          imageLimit: 0,
+          videoLimit: 0,
+          characterCardLimit: 0,
+        },
       };
     }
 
@@ -900,6 +997,17 @@ export async function getSystemConfig(): Promise<SystemConfig> {
         content: row.announcement_content || '',
         enabled: Boolean(row.announcement_enabled),
         updatedAt: Number(row.announcement_updated_at) || 0,
+      },
+      channelEnabled: {
+        sora: row.channel_sora_enabled !== 0,
+        gemini: row.channel_gemini_enabled !== 0,
+        zimage: row.channel_zimage_enabled !== 0,
+        gitee: row.channel_gitee_enabled !== 0,
+      },
+      dailyLimit: {
+        imageLimit: row.daily_limit_image || 0,
+        videoLimit: row.daily_limit_video || 0,
+        characterCardLimit: row.daily_limit_character_card || 0,
       },
     };
   });
@@ -1030,6 +1138,42 @@ export async function updateSystemConfig(
     }
     fields.push('announcement_updated_at = ?');
     values.push(Date.now());
+  }
+  // 渠道启用配置
+  if (updates.channelEnabled) {
+    const c = updates.channelEnabled;
+    if (c.sora !== undefined) {
+      fields.push('channel_sora_enabled = ?');
+      values.push(c.sora ? 1 : 0);
+    }
+    if (c.gemini !== undefined) {
+      fields.push('channel_gemini_enabled = ?');
+      values.push(c.gemini ? 1 : 0);
+    }
+    if (c.zimage !== undefined) {
+      fields.push('channel_zimage_enabled = ?');
+      values.push(c.zimage ? 1 : 0);
+    }
+    if (c.gitee !== undefined) {
+      fields.push('channel_gitee_enabled = ?');
+      values.push(c.gitee ? 1 : 0);
+    }
+  }
+  // 每日请求限制配置
+  if (updates.dailyLimit) {
+    const d = updates.dailyLimit;
+    if (d.imageLimit !== undefined) {
+      fields.push('daily_limit_image = ?');
+      values.push(d.imageLimit);
+    }
+    if (d.videoLimit !== undefined) {
+      fields.push('daily_limit_video = ?');
+      values.push(d.videoLimit);
+    }
+    if (d.characterCardLimit !== undefined) {
+      fields.push('daily_limit_character_card = ?');
+      values.push(d.characterCardLimit);
+    }
   }
 
   if (fields.length > 0) {

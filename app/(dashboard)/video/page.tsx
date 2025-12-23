@@ -26,9 +26,18 @@ import {
   VIDEO_MODELS,
   getVideoModelById,
   buildSoraModelId,
+  filterVideoModelsByChannel,
 } from '@/lib/model-config';
+import type { ChannelEnabledConfig, DailyLimitConfig } from '@/types';
 
 type CreationMode = 'normal' | 'remix' | 'storyboard';
+
+// 每日使用量类型
+interface DailyUsage {
+  imageCount: number;
+  videoCount: number;
+  characterCardCount: number;
+}
 
 const CREATION_MODES = [
   { id: 'normal', label: '普通生成', icon: Video, description: '文本/图片生成视频' },
@@ -40,6 +49,18 @@ export default function VideoGenerationPage() {
   const { update } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+
+  // 渠道启用状态
+  const [channelEnabled, setChannelEnabled] = useState<ChannelEnabledConfig>({
+    sora: true,
+    gemini: true,
+    zimage: true,
+    gitee: true,
+  });
+
+  // 每日限制
+  const [dailyUsage, setDailyUsage] = useState<DailyUsage>({ imageCount: 0, videoCount: 0, characterCardCount: 0 });
+  const [dailyLimits, setDailyLimits] = useState<DailyLimitConfig>({ imageLimit: 0, videoLimit: 0, characterCardLimit: 0 });
 
   // 创作模式
   const [creationMode, setCreationMode] = useState<CreationMode>('normal');
@@ -83,18 +104,50 @@ export default function VideoGenerationPage() {
 
   // 角色卡选择
   const [characterCards, setCharacterCards] = useState<CharacterCard[]>([]);
-  const [showCharacterPicker, setShowCharacterPicker] = useState(false);
-  const [characterPickerPosition, setCharacterPickerPosition] = useState({ top: 0, left: 0 });
-  const [atSearchQuery, setAtSearchQuery] = useState('');
-  const [atCursorPosition, setAtCursorPosition] = useState<number | null>(null);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [displayLimit, setDisplayLimit] = useState(20); // 初始显示20个
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const remixPromptRef = useRef<HTMLTextAreaElement>(null);
 
+  // 过滤后的可用模型
+  const availableModels = filterVideoModelsByChannel(VIDEO_MODELS, channelEnabled);
+
   // 获取当前选中的模型配置
-  const currentModel = getVideoModelById(selectedModelId) || VIDEO_MODELS[0];
+  const currentModel = getVideoModelById(selectedModelId) || availableModels[0];
+
+  // 加载渠道配置
+  useEffect(() => {
+    const loadChannels = async () => {
+      try {
+        const res = await fetch('/api/channels');
+        if (res.ok) {
+          const data = await res.json();
+          setChannelEnabled(data.data);
+        }
+      } catch (err) {
+        console.error('Failed to load channels:', err);
+      }
+    };
+    loadChannels();
+  }, []);
+
+  // 加载每日使用量
+  useEffect(() => {
+    const loadDailyUsage = async () => {
+      try {
+        const res = await fetch('/api/user/daily-usage');
+        if (res.ok) {
+          const data = await res.json();
+          setDailyUsage(data.data.usage);
+          setDailyLimits(data.data.limits);
+        }
+      } catch (err) {
+        console.error('Failed to load daily usage:', err);
+      }
+    };
+    loadDailyUsage();
+  }, []);
 
 
   // 当模型改变时，重置参数到默认值
@@ -140,50 +193,6 @@ export default function VideoGenerationPage() {
   ) => {
     setter(e.target.value);
   };
-
-  // 选择角色卡
-  const selectCharacterCard = (
-    card: CharacterCard,
-    textareaRef: React.RefObject<HTMLTextAreaElement>,
-    currentValue: string,
-    setter: (value: string) => void
-  ) => {
-    if (atCursorPosition === null) return;
-
-    // 在 @ 位置插入「@角色名」
-    const beforeAt = currentValue.slice(0, atCursorPosition);
-    const afterCursor = currentValue.slice(textareaRef.current?.selectionStart || atCursorPosition);
-    // 移除 @ 后已输入的搜索词
-    const cleanAfter = afterCursor.replace(/^[^\s]*/, '');
-
-    const mention = `@${card.characterName}`;
-    const newValue = `${beforeAt}${mention} ${cleanAfter}`;
-    setter(newValue);
-
-    setShowCharacterPicker(false);
-    setAtSearchQuery('');
-    setAtCursorPosition(null);
-
-    // 聚焦回输入框并把光标放在「@角色名 」之后
-    setTimeout(() => {
-      if (textareaRef.current) {
-        const newCursorPos = beforeAt.length + mention.length + 1;
-        textareaRef.current.focus();
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
-      }
-    }, 0);
-  };
-
-  // 过滤角色卡
-  const filteredCharacterCards = characterCards.filter(
-    (card) => {
-      const match = card.characterName.toLowerCase().includes(atSearchQuery) || atSearchQuery === '';
-      if (atSearchQuery) {
-        console.log(`[Search] "${card.characterName}" vs "${atSearchQuery}": ${match}`);
-      }
-      return match;
-    }
-  );
 
   // 轮询任务状态
   const pollTaskStatus = useCallback(
@@ -413,8 +422,15 @@ export default function VideoGenerationPage() {
     return files.map((f) => ({ mimeType: f.mimeType, data: f.data }));
   };
 
+  // 检查是否达到每日限制
+  const isVideoLimitReached = dailyLimits.videoLimit > 0 && dailyUsage.videoCount >= dailyLimits.videoLimit;
+
   // 验证输入
   const validateInput = (): string | null => {
+    // 检查每日限制
+    if (isVideoLimitReached) {
+      return `今日视频生成次数已达上限 (${dailyLimits.videoLimit} 次)`;
+    }
     switch (creationMode) {
       case 'remix':
         if (!remixUrl.trim()) return '请输入视频分享链接或ID';
@@ -496,6 +512,9 @@ export default function VideoGenerationPage() {
         description: '任务已加入队列，可继续提交新任务',
       });
 
+      // 更新今日使用量
+      setDailyUsage(prev => ({ ...prev, videoCount: prev.videoCount + 1 }));
+
       // 清空输入（如果勾选了保留提示词则不清空）
       if (!keepPrompt) {
         switch (creationMode) {
@@ -546,6 +565,9 @@ export default function VideoGenerationPage() {
         description: '已提交 3 个相同任务，等待结果中...',
       });
 
+      // 更新今日使用量
+      setDailyUsage(prev => ({ ...prev, videoCount: prev.videoCount + 3 }));
+
       // 清空输入（如果勾选了保留提示词则不清空）
       if (!keepPrompt) {
         switch (creationMode) {
@@ -571,16 +593,47 @@ export default function VideoGenerationPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-extralight text-white">视频生成</h1>
-        <p className="text-white/50 mt-1 font-light">
-          支持普通生成、Remix、分镜等多种创作模式
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-extralight text-white">视频生成</h1>
+          <p className="text-white/50 mt-1 font-light">
+            支持普通生成、Remix、分镜等多种创作模式
+          </p>
+        </div>
+        {dailyLimits.videoLimit > 0 && (
+          <div className={cn(
+            "px-4 py-2 rounded-xl border text-sm",
+            isVideoLimitReached
+              ? "bg-red-500/10 border-red-500/30 text-red-400"
+              : "bg-white/5 border-white/10 text-white/60"
+          )}>
+            今日: {dailyUsage.videoCount} / {dailyLimits.videoLimit}
+          </div>
+        )}
       </div>
+
+      {/* Sora 渠道禁用提示 */}
+      {!channelEnabled.sora && (
+        <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-yellow-400 flex-shrink-0" />
+          <p className="text-sm text-yellow-200">Sora 视频生成功能已被管理员禁用</p>
+        </div>
+      )}
+
+      {/* 每日限制达到提示 */}
+      {isVideoLimitReached && (
+        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3">
+          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
+          <p className="text-sm text-red-300">今日视频生成次数已达上限，请明天再试</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
-          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm">
+          <div className={cn(
+            "bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-sm",
+            (!channelEnabled.sora || isVideoLimitReached) && "opacity-50 pointer-events-none"
+          )}>
             {/* Header */}
             <div className="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-purple-500/5 to-blue-500/5">
               <div className="flex items-center gap-3">

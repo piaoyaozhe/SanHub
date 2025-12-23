@@ -44,9 +44,11 @@ interface PromptTemplate {
 
 const CHAT_MAX_LENGTH = 2000;
 
-const CANVAS_WIDTH = 2400;
-const CANVAS_HEIGHT = 1400;
+const BASE_CANVAS_WIDTH = 2400;
+const BASE_CANVAS_HEIGHT = 1400;
+const CANVAS_PADDING = 400; // Extra space beyond nodes
 const NODE_WIDTH = 280;
+const NODE_HEIGHT = 400; // Approximate node height
 const HANDLE_OFFSET_Y = 24;
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 1.6;
@@ -83,6 +85,28 @@ export default function WorkspaceEditorPage() {
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
   const nodesRef = useRef<WorkspaceNode[]>([]);
   const edgesRef = useRef<WorkspaceEdge[]>([]);
+
+  // Dynamic canvas size based on node positions
+  const canvasSize = useMemo(() => {
+    if (nodes.length === 0) {
+      return { width: BASE_CANVAS_WIDTH, height: BASE_CANVAS_HEIGHT };
+    }
+    
+    let maxX = 0;
+    let maxY = 0;
+    
+    for (const node of nodes) {
+      const nodeRight = node.position.x + NODE_WIDTH;
+      const nodeBottom = node.position.y + NODE_HEIGHT;
+      if (nodeRight > maxX) maxX = nodeRight;
+      if (nodeBottom > maxY) maxY = nodeBottom;
+    }
+    
+    return {
+      width: Math.max(BASE_CANVAS_WIDTH, maxX + CANVAS_PADDING),
+      height: Math.max(BASE_CANVAS_HEIGHT, maxY + CANVAS_PADDING),
+    };
+  }, [nodes]);
 
   const getCanvasPoint = useCallback(
     (event: PointerEvent | MouseEvent | React.PointerEvent<Element> | React.MouseEvent<Element>) => {
@@ -474,16 +498,16 @@ export default function WorkspaceEditorPage() {
     const padding = 80;
     const nextZoom = clampZoom(
       Math.min(
-        (container.clientWidth - padding) / CANVAS_WIDTH,
-        (container.clientHeight - padding) / CANVAS_HEIGHT
+        (container.clientWidth - padding) / canvasSize.width,
+        (container.clientHeight - padding) / canvasSize.height
       )
     );
     setZoom(nextZoom);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (!scrollRef.current) return;
-        const scrollLeft = Math.max(0, (CANVAS_WIDTH * nextZoom - container.clientWidth) / 2);
-        const scrollTop = Math.max(0, (CANVAS_HEIGHT * nextZoom - container.clientHeight) / 2);
+        const scrollLeft = Math.max(0, (canvasSize.width * nextZoom - container.clientWidth) / 2);
+        const scrollTop = Math.max(0, (canvasSize.height * nextZoom - container.clientHeight) / 2);
         scrollRef.current.scrollLeft = scrollLeft;
         scrollRef.current.scrollTop = scrollTop;
       });
@@ -1128,13 +1152,13 @@ export default function WorkspaceEditorPage() {
         >
           <div
             className="relative"
-            style={{ width: CANVAS_WIDTH * zoom, height: CANVAS_HEIGHT * zoom }}
+            style={{ width: canvasSize.width * zoom, height: canvasSize.height * zoom }}
           >
             <div
               className="absolute inset-0"
               style={{
-                width: CANVAS_WIDTH,
-                height: CANVAS_HEIGHT,
+                width: canvasSize.width,
+                height: canvasSize.height,
                 transform: `scale(${zoom})`,
                 transformOrigin: 'top left',
               }}

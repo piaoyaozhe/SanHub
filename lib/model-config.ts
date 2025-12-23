@@ -347,6 +347,33 @@ export function getVideoModelById(id: string): VideoModelConfig | undefined {
   return VIDEO_MODELS.find((m) => m.id === id);
 }
 
+// 根据渠道启用状态过滤图像模型
+export function filterImageModelsByChannel(
+  models: ImageModelConfig[],
+  channelEnabled: { sora: boolean; gemini: boolean; zimage: boolean; gitee: boolean }
+): ImageModelConfig[] {
+  return models.filter((model) => {
+    if (model.provider === 'sora') return channelEnabled.sora;
+    if (model.provider === 'gemini') return channelEnabled.gemini;
+    if (model.provider === 'zimage') {
+      if (model.channel === 'gitee') return channelEnabled.gitee;
+      return channelEnabled.zimage;
+    }
+    return true;
+  });
+}
+
+// 根据渠道启用状态过滤视频模型
+export function filterVideoModelsByChannel(
+  models: VideoModelConfig[],
+  channelEnabled: { sora: boolean; gemini: boolean; zimage: boolean; gitee: boolean }
+): VideoModelConfig[] {
+  return models.filter((model) => {
+    if (model.provider === 'sora') return channelEnabled.sora;
+    return true;
+  });
+}
+
 // 获取图像模型的当前分辨率
 export function getImageResolution(
   model: ImageModelConfig,

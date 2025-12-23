@@ -128,6 +128,21 @@ export interface AnnouncementConfig {
   updatedAt: number;
 }
 
+// 渠道启用配置
+export interface ChannelEnabledConfig {
+  sora: boolean;
+  gemini: boolean;
+  zimage: boolean;
+  gitee: boolean;
+}
+
+// 每日请求限制配置
+export interface DailyLimitConfig {
+  imageLimit: number;      // 图像生成每日限制，0 表示不限制
+  videoLimit: number;      // 视频生成每日限制，0 表示不限制
+  characterCardLimit: number; // 角色卡每日限制，0 表示不限制
+}
+
 // 系统配置
 export interface SystemConfig {
   soraApiKey: string;
@@ -152,6 +167,10 @@ export interface SystemConfig {
   defaultBalance: number;
   // 公告配置
   announcement: AnnouncementConfig;
+  // 渠道启用配置
+  channelEnabled: ChannelEnabledConfig;
+  // 每日请求限制配置
+  dailyLimit: DailyLimitConfig;
 }
 
 // 定价配置

@@ -17,11 +17,25 @@ export class MySQLAdapter implements DatabaseAdapter {
       password: process.env.MYSQL_PASSWORD || '',
       database: process.env.MYSQL_DATABASE || 'sanhub',
       waitForConnections: true,
-      connectionLimit: parseInt(process.env.MYSQL_POOL_SIZE || '50'), // 支持更多并发
-      queueLimit: 100, // 队列限制
+      connectionLimit: parseInt(process.env.MYSQL_POOL_SIZE || '20'),
+      queueLimit: 0, // 0 = unlimited queue, prevents connection errors under load
       enableKeepAlive: true,
-      keepAliveInitialDelay: 10000,
+      keepAliveInitialDelay: 30000,
+      // Performance optimizations
+      namedPlaceholders: false,
+      decimalNumbers: true,
+      supportBigNumbers: true,
+      bigNumberStrings: false,
+      dateStrings: false,
+      // Connection timeout settings
+      connectTimeout: 10000,
+      // Idle connection handling
+      idleTimeout: 60000,
+      maxIdle: parseInt(process.env.MYSQL_POOL_SIZE || '20'),
     });
+
+    // Log pool status on creation
+    console.log(`[MySQL] Pool created: connectionLimit=${process.env.MYSQL_POOL_SIZE || '20'}`);
   }
 
   async execute(sql: string, params?: unknown[]): Promise<[unknown[], unknown]> {
@@ -30,6 +44,16 @@ export class MySQLAdapter implements DatabaseAdapter {
 
   async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  // Expose pool stats for monitoring
+  getPoolStats(): { total: number; idle: number; waiting: number } {
+    const pool = this.pool.pool;
+    return {
+      total: pool?._allConnections?.length || 0,
+      idle: pool?._freeConnections?.length || 0,
+      waiting: pool?._connectionQueue?.length || 0,
+    };
   }
 }
 

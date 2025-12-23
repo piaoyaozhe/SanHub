@@ -3,14 +3,16 @@
 import { useState, useEffect } from 'react';
 import { 
   Video, Palette, Zap, GitBranch, Loader2, Save, Eye, EyeOff, Image, 
-  Plus, Trash2, ChevronDown, ChevronUp, Settings2, Power, AlertCircle,
-  GripVertical, Check, X, Edit2, Copy, ExternalLink
+  Trash2, ChevronDown, ChevronUp, Settings2, AlertCircle, ExternalLink, Gauge
 } from 'lucide-react';
 import { toast } from '@/components/ui/toaster';
-import type { SystemConfig } from '@/types';
+import type { SystemConfig, DailyLimitConfig } from '@/types';
 
 // API 服务类型
 type ApiServiceType = 'sora' | 'gemini' | 'zimage' | 'gitee' | 'picui';
+
+// 渠道类型（可禁用的）
+type ChannelType = 'sora' | 'gemini' | 'zimage' | 'gitee';
 
 interface ApiServiceConfig {
   id: ApiServiceType;
@@ -20,6 +22,7 @@ interface ApiServiceConfig {
   color: string;
   bgColor: string;
   fields: ApiField[];
+  channelKey?: ChannelType; // 对应的渠道 key，用于启用/禁用
 }
 
 interface ApiField {
@@ -40,6 +43,7 @@ const apiServices: ApiServiceConfig[] = [
     icon: Video,
     color: 'text-blue-400',
     bgColor: 'bg-blue-500/20',
+    channelKey: 'sora',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', configKey: 'soraApiKey' },
       { key: 'baseUrl', label: 'Base URL', type: 'url', placeholder: 'http://localhost:8000', configKey: 'soraBaseUrl' },
@@ -52,6 +56,7 @@ const apiServices: ApiServiceConfig[] = [
     icon: Palette,
     color: 'text-purple-400',
     bgColor: 'bg-purple-500/20',
+    channelKey: 'gemini',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', configKey: 'geminiApiKey' },
       { key: 'baseUrl', label: 'Base URL', type: 'url', placeholder: 'https://generativelanguage.googleapis.com', configKey: 'geminiBaseUrl' },
@@ -64,6 +69,7 @@ const apiServices: ApiServiceConfig[] = [
     icon: Zap,
     color: 'text-green-400',
     bgColor: 'bg-green-500/20',
+    channelKey: 'zimage',
     fields: [
       { key: 'apiKey', label: 'API Key', type: 'password', placeholder: 'ms-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', configKey: 'zimageApiKey' },
       { key: 'baseUrl', label: 'Base URL', type: 'url', placeholder: 'https://api-inference.modelscope.cn/', configKey: 'zimageBaseUrl' },
@@ -76,6 +82,7 @@ const apiServices: ApiServiceConfig[] = [
     icon: GitBranch,
     color: 'text-orange-400',
     bgColor: 'bg-orange-500/20',
+    channelKey: 'gitee',
     fields: [
       { key: 'freeApiKey', label: '免费 Key', type: 'password', placeholder: '免费 key（失败时才会使用付费 keys）', configKey: 'giteeFreeApiKey' },
       { key: 'apiKeys', label: 'API Keys（多个用逗号分隔）', type: 'textarea', placeholder: 'key1,key2,key3', description: '多个 Key 将自动轮询使用', configKey: 'giteeApiKey' },
@@ -105,6 +112,10 @@ function ApiCard({
   onToggleExpand,
   showKeys,
   onToggleShowKey,
+  channelEnabled,
+  onToggleChannel,
+  onClearPicuiCache,
+  clearingCache,
 }: {
   service: ApiServiceConfig;
   config: SystemConfig;
@@ -113,6 +124,10 @@ function ApiCard({
   onToggleExpand: () => void;
   showKeys: Record<string, boolean>;
   onToggleShowKey: (key: string) => void;
+  channelEnabled?: boolean;
+  onToggleChannel?: () => void;
+  onClearPicuiCache?: () => void;
+  clearingCache?: boolean;
 }) {
   const Icon = service.icon;
   
@@ -145,11 +160,35 @@ function ApiCard({
                   未配置
                 </span>
               )}
+              {service.channelKey && channelEnabled === false && (
+                <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
+                  已禁用
+                </span>
+              )}
             </div>
             <p className="text-sm text-white/50 mt-0.5">{service.description}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* 渠道启用开关 */}
+          {service.channelKey && onToggleChannel && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleChannel();
+              }}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                channelEnabled ? 'bg-green-500' : 'bg-white/20'
+              }`}
+              title={channelEnabled ? '点击禁用此渠道' : '点击启用此渠道'}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform shadow-sm ${
+                  channelEnabled ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          )}
           <div className={`p-2 rounded-lg transition-colors ${expanded ? 'bg-white/10' : 'bg-white/5 group-hover:bg-white/10'}`}>
             {expanded ? (
               <ChevronUp className="w-5 h-5 text-white/60" />
@@ -226,14 +265,30 @@ function ApiCard({
             </div>
           )}
           
-          {/* PicUI 提示 */}
+          {/* PicUI 提示和清空缓存按钮 */}
           {service.id === 'picui' && (
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
-              <AlertCircle className="w-4 h-4 text-white/40 mt-0.5 flex-shrink-0" />
-              <p className="text-xs text-white/40">
-                未配置时将使用本地文件存储。从 picui.cn 个人中心获取 Token。
-              </p>
-            </div>
+            <>
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                <AlertCircle className="w-4 h-4 text-white/40 mt-0.5 flex-shrink-0" />
+                <p className="text-xs text-white/40">
+                  未配置时将使用本地文件存储。从 picui.cn 个人中心获取 Token。
+                </p>
+              </div>
+              {isConfigured && onClearPicuiCache && (
+                <button
+                  onClick={onClearPicuiCache}
+                  disabled={clearingCache}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl transition-colors disabled:opacity-50"
+                >
+                  {clearingCache ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-4 h-4" />
+                  )}
+                  一键清空图床缓存
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -248,6 +303,7 @@ export default function ApiConfigPage() {
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
   const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
   const [hasChanges, setHasChanges] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
 
   useEffect(() => {
     loadConfig();
@@ -258,12 +314,27 @@ export default function ApiConfigPage() {
       const res = await fetch('/api/admin/settings');
       if (res.ok) {
         const data = await res.json();
-        setConfig(data.data);
+        // 确保 channelEnabled 存在
+        const configData = {
+          ...data.data,
+          channelEnabled: data.data.channelEnabled || {
+            sora: true,
+            gemini: true,
+            zimage: true,
+            gitee: true,
+          },
+          dailyLimit: data.data.dailyLimit || {
+            imageLimit: 0,
+            videoLimit: 0,
+            characterCardLimit: 0,
+          },
+        };
+        setConfig(configData);
         // 默认展开已配置的卡片
         const expanded: Record<string, boolean> = {};
         apiServices.forEach(service => {
           const isConfigured = service.fields.some(field => {
-            const value = data.data[field.configKey];
+            const value = configData[field.configKey];
             return value && String(value).length > 0;
           });
           expanded[service.id] = isConfigured;
@@ -281,6 +352,47 @@ export default function ApiConfigPage() {
     if (!config) return;
     setConfig({ ...config, [key]: value });
     setHasChanges(true);
+  };
+
+  const handleToggleChannel = (channelKey: ChannelType) => {
+    if (!config) return;
+    const newChannelEnabled = {
+      ...config.channelEnabled,
+      [channelKey]: !config.channelEnabled[channelKey],
+    };
+    setConfig({ ...config, channelEnabled: newChannelEnabled });
+    setHasChanges(true);
+  };
+
+  const handleClearPicuiCache = async () => {
+    if (!config?.picuiApiKey) {
+      toast({ title: '请先配置 PicUI API Token', variant: 'destructive' });
+      return;
+    }
+
+    if (!confirm('确定要清空 PicUI 图床上的所有图片吗？此操作不可恢复！')) {
+      return;
+    }
+
+    setClearingCache(true);
+    try {
+      const res = await fetch('/api/admin/picui/clear', { method: 'POST' });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error || '清空失败');
+      }
+      
+      toast({ title: `✓ 已清空 ${data.deleted || 0} 张图片` });
+    } catch (err) {
+      toast({ 
+        title: '清空失败', 
+        description: err instanceof Error ? err.message : '未知错误', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setClearingCache(false);
+    }
   };
 
   const saveConfig = async () => {
@@ -415,6 +527,69 @@ export default function ApiConfigPage() {
         </div>
       </div>
 
+      {/* 每日请求限制 */}
+      <div className="bg-white/[0.03] backdrop-blur-sm border border-white/10 rounded-2xl p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-amber-500/20 rounded-xl flex items-center justify-center">
+            <Gauge className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-white">每日请求限制</h2>
+            <p className="text-sm text-white/40">限制用户每天的生成次数，0 表示不限制</p>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-white/70">图像生成 / 天</label>
+            <input
+              type="number"
+              value={config.dailyLimit?.imageLimit || 0}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 0;
+                setConfig({ ...config, dailyLimit: { ...config.dailyLimit, imageLimit: val } });
+                setHasChanges(true);
+              }}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              min="0"
+              placeholder="0 = 不限制"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-white/70">视频生成 / 天</label>
+            <input
+              type="number"
+              value={config.dailyLimit?.videoLimit || 0}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 0;
+                setConfig({ ...config, dailyLimit: { ...config.dailyLimit, videoLimit: val } });
+                setHasChanges(true);
+              }}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              min="0"
+              placeholder="0 = 不限制"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-white/70">角色卡生成 / 天</label>
+            <input
+              type="number"
+              value={config.dailyLimit?.characterCardLimit || 0}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 0;
+                setConfig({ ...config, dailyLimit: { ...config.dailyLimit, characterCardLimit: val } });
+                setHasChanges(true);
+              }}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/20 transition-all"
+              min="0"
+              placeholder="0 = 不限制"
+            />
+          </div>
+        </div>
+      </div>
+
       {/* API 服务列表 */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -446,6 +621,10 @@ export default function ApiConfigPage() {
               onToggleExpand={() => toggleExpand(service.id)}
               showKeys={showKeys}
               onToggleShowKey={toggleShowKey}
+              channelEnabled={service.channelKey ? config.channelEnabled[service.channelKey] : undefined}
+              onToggleChannel={service.channelKey ? () => handleToggleChannel(service.channelKey!) : undefined}
+              onClearPicuiCache={service.id === 'picui' ? handleClearPicuiCache : undefined}
+              clearingCache={clearingCache}
             />
           ))}
         </div>
