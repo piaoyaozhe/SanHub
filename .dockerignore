@@ -46,6 +46,8 @@ Dockerfile
 docker-compose.yml
 .dockerignore
 
-# Data
-data/
+# Data (keep prompts templates)
+data/*.db
+data/*.db-*
+data/media/
 *.db

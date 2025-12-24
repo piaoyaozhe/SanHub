@@ -168,13 +168,17 @@ export async function initializeDatabase(): Promise<void> {
     }
   }
 
-  // 迁移：确保 avatar_url 列是 LONGTEXT（修复已有表）
-  try {
-    await db.execute(`
-      ALTER TABLE character_cards MODIFY COLUMN avatar_url LONGTEXT
-    `);
-  } catch (e) {
-    // 忽略错误（列可能已经是正确类型或表不存在）
+  const dbType = process.env.DB_TYPE || 'sqlite';
+
+  // 迁移：确保 avatar_url 列是 LONGTEXT（仅 MySQL 需要，SQLite 不支持 MODIFY COLUMN）
+  if (dbType === 'mysql') {
+    try {
+      await db.execute(`
+        ALTER TABLE character_cards MODIFY COLUMN avatar_url LONGTEXT
+      `);
+    } catch (e) {
+      // 忽略错误（列可能已经是正确类型或表不存在）
+    }
   }
 
   // 初始化系统配置（如果不存在）
@@ -202,8 +206,6 @@ export async function initializeDatabase(): Promise<void> {
   }
 
   // 添加 generations 表的新字段（如果不存在）
-  const dbType = process.env.DB_TYPE || 'sqlite';
-  
   try {
     if (dbType === 'mysql') {
       await db.execute('ALTER TABLE generations ADD COLUMN status ENUM("pending", "processing", "completed", "failed") DEFAULT "pending"');
