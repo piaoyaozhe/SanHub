@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getSystemConfig } from '@/lib/db';
+import { cache, CacheKeys } from '@/lib/cache';
 
 // GET /api/site-config - 获取网站配置（公开接口）
 export async function GET() {
   try {
+    // 清除缓存确保获取最新配置
+    cache.delete(CacheKeys.SYSTEM_CONFIG);
     const config = await getSystemConfig();
     return NextResponse.json({
       success: true,
