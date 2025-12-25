@@ -1969,6 +1969,7 @@ CREATE TABLE IF NOT EXISTS image_models (
 
 // 初始化图像渠道和模型表
 export async function initializeImageChannelsTables(): Promise<void> {
+  await initializeDatabase();
   const db = getAdapter();
   const statements = CREATE_IMAGE_CHANNELS_SQL.split(';').filter((s) => s.trim());
 
@@ -2056,6 +2057,7 @@ export async function updateImageChannel(
   updates: Partial<Omit<ImageChannel, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<ImageChannel | null> {
   await initializeDatabase();
+  await initializeImageChannelsTables();
   const db = getAdapter();
 
   const fields: string[] = ['updated_at = ?'];
@@ -2076,6 +2078,7 @@ export async function updateImageChannel(
 // 删除图像渠道
 export async function deleteImageChannel(id: string): Promise<boolean> {
   await initializeDatabase();
+  await initializeImageChannelsTables();
   const db = getAdapter();
 
   // 先删除该渠道下的所有模型
@@ -2312,6 +2315,7 @@ export async function updateImageModel(
   updates: Partial<Omit<ImageModel, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<ImageModel | null> {
   await initializeDatabase();
+  await initializeImageChannelsTables();
   const db = getAdapter();
 
   const fields: string[] = ['updated_at = ?'];
@@ -2345,6 +2349,7 @@ export async function updateImageModel(
 // 删除图像模型
 export async function deleteImageModel(id: string): Promise<boolean> {
   await initializeDatabase();
+  await initializeImageChannelsTables();
   const db = getAdapter();
 
   const [result] = await db.execute('DELETE FROM image_models WHERE id = ?', [id]);
@@ -2462,6 +2467,7 @@ CREATE TABLE IF NOT EXISTS video_models (
 
 // 初始化视频渠道表
 export async function initializeVideoChannelsTables(): Promise<void> {
+  await initializeDatabase();
   const db = getAdapter();
   const statements = CREATE_VIDEO_CHANNELS_SQL.split(';').filter((s) => s.trim());
 
@@ -2549,6 +2555,7 @@ export async function updateVideoChannel(
   updates: Partial<Omit<VideoChannel, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<VideoChannel | null> {
   await initializeDatabase();
+  await initializeVideoChannelsTables();
   const db = getAdapter();
 
   const fields: string[] = ['updated_at = ?'];
@@ -2569,6 +2576,7 @@ export async function updateVideoChannel(
 // 删除视频渠道
 export async function deleteVideoChannel(id: string): Promise<boolean> {
   await initializeDatabase();
+  await initializeVideoChannelsTables();
   const db = getAdapter();
 
   await db.execute('DELETE FROM video_models WHERE channel_id = ?', [id]);
@@ -2751,6 +2759,7 @@ export async function updateVideoModel(
   updates: Partial<Omit<VideoModel, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<VideoModel | null> {
   await initializeDatabase();
+  await initializeVideoChannelsTables();
   const db = getAdapter();
 
   const fields: string[] = ['updated_at = ?'];
@@ -2780,6 +2789,7 @@ export async function updateVideoModel(
 // 删除视频模型
 export async function deleteVideoModel(id: string): Promise<boolean> {
   await initializeDatabase();
+  await initializeVideoChannelsTables();
   const db = getAdapter();
 
   const [result] = await db.execute('DELETE FROM video_models WHERE id = ?', [id]);
