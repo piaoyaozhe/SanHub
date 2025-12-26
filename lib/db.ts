@@ -668,8 +668,8 @@ export async function getAllUsers(options: {
 } = {}): Promise<SafeUser[]> {
   await initializeDatabase();
   const db = getAdapter();
-  const limit = Math.max(options.limit ?? 200, 1);
-  const offset = Math.max(options.offset ?? 0, 0);
+  const limit = Math.max(Number(options.limit) || 200, 1);
+  const offset = Math.max(Number(options.offset) || 0, 0);
   const search = options.search?.trim();
 
   let sql = 'SELECT id, email, name, role, balance, disabled, created_at FROM users';
@@ -681,8 +681,7 @@ export async function getAllUsers(options: {
     params.push(term, term);
   }
 
-  sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  params.push(limit, offset);
+  sql += ` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`;
 
   const [rows] = await db.execute(sql, params);
 
@@ -806,10 +805,12 @@ export async function getUserGenerations(
 ): Promise<Generation[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(Number(limit) || 50, 1);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
 
   const [rows] = await db.execute(
-    `SELECT * FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [userId, limit, offset]
+    `SELECT * FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+    [userId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -831,11 +832,11 @@ export async function getUserGenerations(
 export async function getPendingGenerations(userId: string, limit = 50): Promise<Generation[]> {
   await initializeDatabase();
   const db = getAdapter();
-  const safeLimit = Math.max(limit, 1);
+  const safeLimit = Math.max(Number(limit) || 50, 1);
 
   const [rows] = await db.execute(
-    `SELECT * FROM generations WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ?`,
-    [userId, safeLimit]
+    `SELECT * FROM generations WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ${safeLimit}`,
+    [userId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -1476,10 +1477,11 @@ export async function createChatSession(userId: string, modelId: string, title =
 export async function getUserChatSessions(userId: string, limit = 50): Promise<ChatSession[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(Number(limit) || 50, 1);
 
   const [rows] = await db.execute(
-    'SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?',
-    [userId, limit]
+    `SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT ${safeLimit}`,
+    [userId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -1561,10 +1563,11 @@ export async function saveChatMessage(message: Omit<ChatMessage, 'id' | 'created
 export async function getSessionMessages(sessionId: string, limit = 100): Promise<ChatMessage[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(Number(limit) || 100, 1);
 
   const [rows] = await db.execute(
-    'SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ?',
-    [sessionId, limit]
+    `SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC LIMIT ${safeLimit}`,
+    [sessionId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -1710,10 +1713,12 @@ export async function getUserCharacterCards(
 ): Promise<CharacterCard[]> {
   await initializeDatabase();
   const db = getAdapter();
+  const safeLimit = Math.max(Number(limit) || 50, 1);
+  const safeOffset = Math.max(Number(offset) || 0, 0);
 
   const [rows] = await db.execute(
-    `SELECT * FROM character_cards WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    [userId, limit, offset]
+    `SELECT * FROM character_cards WHERE user_id = ? ORDER BY created_at DESC LIMIT ${safeLimit} OFFSET ${safeOffset}`,
+    [userId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -1732,11 +1737,11 @@ export async function getUserCharacterCards(
 export async function getPendingCharacterCards(userId: string, limit = 50): Promise<CharacterCard[]> {
   await initializeDatabase();
   const db = getAdapter();
-  const safeLimit = Math.max(limit, 1);
+  const safeLimit = Math.max(Number(limit) || 50, 1);
 
   const [rows] = await db.execute(
-    `SELECT * FROM character_cards WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ?`,
-    [userId, safeLimit]
+    `SELECT * FROM character_cards WHERE user_id = ? AND status IN ('pending', 'processing') ORDER BY created_at DESC LIMIT ${safeLimit}`,
+    [userId]
   );
 
   return (rows as any[]).map((row) => ({
@@ -1826,8 +1831,8 @@ export async function getWorkspaceSummaries(
 ): Promise<WorkspaceSummary[]> {
   await initializeDatabase();
   const db = getAdapter();
-  const limit = Math.max(options.limit ?? 200, 1);
-  const offset = Math.max(options.offset ?? 0, 0);
+  const limit = Math.max(Number(options.limit) || 200, 1);
+  const offset = Math.max(Number(options.offset) || 0, 0);
   const search = options.search?.trim();
   const sort = options.sort === 'created' ? 'created_at' : 'updated_at';
   const order = options.order === 'asc' ? 'ASC' : 'DESC';
@@ -1840,8 +1845,7 @@ export async function getWorkspaceSummaries(
     params.push(`%${search}%`);
   }
 
-  sql += ` ORDER BY ${sort} ${order} LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
+  sql += ` ORDER BY ${sort} ${order} LIMIT ${limit} OFFSET ${offset}`;
 
   const [rows] = await db.execute(sql, params);
 
