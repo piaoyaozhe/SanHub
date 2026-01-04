@@ -257,24 +257,37 @@ export async function generateVideo(
     dispatcher: soraAgent,
   });
 
-  const data = await response.json() as any;
+  const rawData = await response.json() as any;
 
-  // 版本标记 v2 - 用于确认部署
-  console.log('[Sora API v2] 视频生成响应:', {
-    status: response.status,
-    ok: response.ok,
-    hasUrl: !!data?.url,
+  // 版本标记 v3 - 支持 NewAPI 格式
+  console.log('[Sora API v3] 原始响应:', JSON.stringify(rawData));
+
+  // 处理 NewAPI 包装格式：{code: "...", message: "{json string}", data: null}
+  let data = rawData;
+  if (rawData?.code && rawData?.message && typeof rawData.message === 'string') {
+    try {
+      // 尝试解析 message 字段中的 JSON
+      const parsed = JSON.parse(rawData.message);
+      if (parsed?.id) {
+        console.log('[Sora API v3] 检测到 NewAPI 格式，解析 message 字段');
+        data = parsed;
+      }
+    } catch {
+      // message 不是有效 JSON，保持原样
+    }
+  }
+
+  console.log('[Sora API v3] 解析后数据:', {
+    hasId: !!data?.id,
     taskStatus: data?.status,
     taskId: data?.id,
-    dataKeys: Object.keys(data || {}),
+    hasUrl: !!data?.url,
   });
 
-  // 始终打印完整响应用于调试
-  console.log('[Sora API v2] 完整响应体:', JSON.stringify(data));
-
-  if (!response.ok) {
-    const errorMessage = data?.error?.message || data?.message || data?.error || '视频生成失败';
-    console.error('[Sora API v2] 视频生成错误:', errorMessage);
+  // 检查是否是错误响应（NewAPI 格式的真正错误）
+  if (!response.ok && !data?.id) {
+    const errorMessage = data?.error?.message || rawData?.message || data?.error || '视频生成失败';
+    console.error('[Sora API v3] 视频生成错误:', errorMessage);
     throw new Error(errorMessage);
   }
 
