@@ -142,6 +142,8 @@ export async function getVideoStatus(videoId: string): Promise<VideoTaskResponse
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   const apiUrl = `${normalizedBaseUrl}/v1/videos/${videoId}`;
   
+  console.log('[Sora API v5] 查询视频状态:', apiUrl);
+  
   const response = await undiciFetch(apiUrl, {
     method: 'GET',
     headers: {
@@ -150,14 +152,89 @@ export async function getVideoStatus(videoId: string): Promise<VideoTaskResponse
     dispatcher: soraAgent,
   });
   
-  const data = await response.json() as any;
+  const rawData = await response.json() as any;
+  console.log('[Sora API v5] 查询响应:', JSON.stringify(rawData).substring(0, 200));
   
-  if (!response.ok) {
-    const errorMessage = data?.error?.message || data?.message || '查询视频状态失败';
+  // 处理 NewAPI 包装格式
+  let data = rawData;
+  if (rawData?.code && rawData?.message && typeof rawData.message === 'string') {
+    try {
+      const parsed = JSON.parse(rawData.message);
+      if (parsed?.id) {
+        data = parsed;
+        if (data.output?.url && !data.url) {
+          data.url = data.output.url;
+        }
+      }
+    } catch {
+      // 尝试正则提取
+      const idMatch = rawData.message.match(/"id"\s*:\s*"([^"]+)"/);
+      const statusMatch = rawData.message.match(/"status"\s*:\s*"([^"]+)"/);
+      const progressMatch = rawData.message.match(/"progress"\s*:\s*(\d+)/);
+      const urlMatch = rawData.message.match(/"url"\s*:\s*"(https?:\/\/[^"]+)"/);
+      if (!urlMatch) {
+        // 尝试匹配截断的 URL
+        const truncatedUrlMatch = rawData.message.match(/"url"\s*:\s*"(https?:\/\/[^"]+)/);
+        if (truncatedUrlMatch) {
+          data = {
+            id: idMatch?.[1] || videoId,
+            status: statusMatch?.[1] || 'processing',
+            progress: progressMatch ? parseInt(progressMatch[1]) : 0,
+            url: truncatedUrlMatch[1],
+          };
+        }
+      } else if (idMatch) {
+        data = {
+          id: idMatch[1],
+          status: statusMatch?.[1] || 'processing',
+          progress: progressMatch ? parseInt(progressMatch[1]) : 0,
+          url: urlMatch?.[1],
+        };
+      }
+    }
+  }
+  
+  if (!response.ok && !data?.id) {
+    const errorMessage = data?.error?.message || rawData?.message || '查询视频状态失败';
     throw new Error(errorMessage);
   }
   
   return data as VideoTaskResponse;
+}
+
+// 获取视频内容 URL（通过 /content 端点）
+export async function getVideoContentUrl(videoId: string): Promise<string> {
+  const { apiKey, baseUrl } = await getSoraConfig();
+  
+  if (!apiKey) {
+    throw new Error('Sora API Key 未配置');
+  }
+  
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
+  const apiUrl = `${normalizedBaseUrl}/v1/videos/${videoId}/content`;
+  
+  console.log('[Sora API v5] 获取视频内容:', apiUrl);
+  
+  // 使用 HEAD 请求获取重定向 URL，或者直接返回 content URL
+  const response = await undiciFetch(apiUrl, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+    },
+    redirect: 'manual',
+    dispatcher: soraAgent,
+  });
+  
+  // 如果是重定向，返回 Location
+  if (response.status === 302 || response.status === 301) {
+    const location = response.headers.get('location');
+    if (location) {
+      return location;
+    }
+  }
+  
+  // 否则直接返回 content URL
+  return apiUrl;
 }
 
 // 轮询等待视频完成
@@ -176,9 +253,20 @@ async function pollVideoCompletion(
       onProgress(status.progress, status.status);
     }
     
-    console.log(`[Sora API] 视频状态: ${status.status}, 进度: ${status.progress}%`);
+    console.log(`[Sora API v5] 视频状态: ${status.status}, 进度: ${status.progress}%, hasUrl: ${!!status.url}`);
     
-    if (status.status === 'succeeded') {
+    // 成功状态
+    if (status.status === 'succeeded' || status.status === 'completed') {
+      // 如果没有 URL，尝试通过 /content 端点获取
+      if (!status.url) {
+        try {
+          console.log('[Sora API v5] 状态完成但无 URL，尝试 /content 端点');
+          const contentUrl = await getVideoContentUrl(videoId);
+          status.url = contentUrl;
+        } catch (e) {
+          console.log('[Sora API v5] /content 端点获取失败:', e);
+        }
+      }
       return status;
     }
     
