@@ -283,19 +283,24 @@ export async function generateVideo(
       try {
         const idMatch = rawData.message.match(/"id"\s*:\s*"([^"]+)"/);
         const statusMatch = rawData.message.match(/"status"\s*:\s*"([^"]+)"/);
-        // 匹配 "url" 或 "output":{"url" 格式
-        const urlMatch = rawData.message.match(/"url"\s*:\s*"(https?:\/\/[^"\\]*(?:\\.[^"\\]*)*)"/);
+        // 匹配 URL - 支持截断的情况（URL 可能没有闭合引号）
+        // 先尝试匹配完整 URL，再尝试匹配截断的
+        let urlMatch = rawData.message.match(/"url"\s*:\s*"(https?:\/\/[^"]+)"/);
+        if (!urlMatch) {
+          // 匹配截断的 URL（到字符串末尾）
+          urlMatch = rawData.message.match(/"url"\s*:\s*"(https?:\/\/[^"]+)/);
+        }
         
         if (idMatch) {
-          console.log('[Sora API v5] 使用正则提取关键字段');
+          console.log('[Sora API v5] 使用正则提取关键字段, urlFound:', !!urlMatch);
           data = {
             id: idMatch[1],
             status: statusMatch ? statusMatch[1] : undefined,
-            url: urlMatch ? urlMatch[1].replace(/\\"/g, '"') : undefined,
+            url: urlMatch ? urlMatch[1] : undefined,
           };
         }
-      } catch {
-        // 正则提取也失败，保持原样
+      } catch (regexError) {
+        console.log('[Sora API v5] 正则提取失败:', regexError);
       }
     }
   }
@@ -305,7 +310,7 @@ export async function generateVideo(
     taskStatus: data?.status,
     taskId: data?.id,
     hasUrl: !!data?.url,
-    url: data?.url?.substring(0, 50),
+    url: data?.url?.substring(0, 80),
   });
 
   // 检查是否是错误响应（NewAPI 格式的真正错误）
