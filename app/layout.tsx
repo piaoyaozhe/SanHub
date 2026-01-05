@@ -5,6 +5,9 @@ import { Providers } from '@/components/providers';
 import { getSystemConfig } from '@/lib/db';
 import type { SiteConfig } from '@/types';
 
+// Disable caching to always get fresh config
+export const dynamic = 'force-dynamic';
+
 const inter = Inter({ subsets: ['latin'] });
 
 async function getSiteConfig(): Promise<SiteConfig> {
