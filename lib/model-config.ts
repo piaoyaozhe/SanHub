@@ -395,8 +395,8 @@ export function getImageResolution(
 }
 
 // 构建 Sora 模型 ID
-// 新格式: sora-video-{orientation}-{duration}
-// 例如: sora-video-landscape-10s, sora-video-portrait-15s, sora-video-landscape-25s
+// 新格式: sora2-{orientation}-{duration}
+// 例如: sora2-landscape-10s, sora2-portrait-15s, sora2-landscape-25s
 export function buildSoraModelId(ratio: string, duration: string): string {
-  return `sora-video-${ratio}-${duration}`;
+  return `sora2-${ratio}-${duration}`;
 }

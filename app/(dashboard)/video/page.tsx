@@ -446,7 +446,7 @@ export default function VideoGenerationPage() {
 
   // 构建模型 ID（用于 Sora 类型）
   const buildModelId = (ratio: string, dur: string): string => {
-    return `sora-video-${ratio}-${dur}`;
+    return `sora2-${ratio}-${dur}`;
   };
 
   // 单次提交任务的核心函数

@@ -374,7 +374,7 @@ export interface ApiResponse<T = unknown> {
 // Sora 生成请求
 export interface SoraGenerateRequest {
   prompt: string;
-  model: string; // sora-video-landscape-10s, sora-image 等
+  model: string; // sora2-landscape-10s, sora-image 等
   files?: { mimeType: string; data: string }[];
   referenceImageUrl?: string;
   style_id?: string; // 风格: festive, retro, news, selfie, handheld, anime, comic, golden, vintage
