@@ -234,6 +234,16 @@ export async function getVideoStatus(videoId: string): Promise<VideoTaskResponse
     throw new Error(errorMessage);
   }
   
+  // 确保 progress 有默认值
+  if (typeof data.progress !== 'number') {
+    data.progress = 0;
+  }
+  
+  // 处理 output.url 格式
+  if (data.output?.url && !data.url) {
+    data.url = data.output.url;
+  }
+  
   return data as VideoTaskResponse;
 }
 
@@ -452,6 +462,7 @@ export async function generateVideo(
     hasId: !!data?.id,
     taskStatus: data?.status,
     taskId: data?.id,
+    progress: data?.progress,
     hasUrl: !!data?.url || !!data?.output?.url,
     url: (data?.url || data?.output?.url)?.substring(0, 80),
   });
@@ -459,6 +470,11 @@ export async function generateVideo(
   // 统一处理 output.url 格式
   if (data?.output?.url && !data?.url) {
     data.url = data.output.url;
+  }
+  
+  // 确保 progress 有默认值
+  if (data && typeof data.progress !== 'number') {
+    data.progress = 0;
   }
 
   // 检查是否是错误响应（NewAPI 格式的真正错误）
