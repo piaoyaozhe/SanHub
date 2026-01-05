@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGeneration } from '@/lib/db';
 import { readMediaFile, isLocalFile } from '@/lib/media-storage';
+import { getVideoContentUrl } from '@/lib/sora-api';
 
 // 媒体文件服务端点
 // 支持多种存储方式：
 // 1. 本地文件 (file:xxx.png)
 // 2. 外部 URL (http/https)
 // 3. Base64 data URL (data:image/png;base64,xxx)
+// 4. Sora /content 端点 (需要 API Key 认证)
 
 export async function GET(
   request: NextRequest,
@@ -21,10 +23,28 @@ export async function GET(
       return new NextResponse('Not Found', { status: 404 });
     }
     
-    const resultUrl = generation.resultUrl;
+    let resultUrl = generation.resultUrl;
     
     if (!resultUrl) {
       return new NextResponse('No Content', { status: 204 });
+    }
+    
+    // 检查是否是 Sora /content 端点 URL（需要 API Key 认证）
+    if (resultUrl.includes('/v1/videos/') && resultUrl.includes('/content')) {
+      // 从 URL 中提取 video ID
+      const match = resultUrl.match(/\/v1\/videos\/([^/]+)\/content/);
+      if (match) {
+        const videoId = match[1];
+        try {
+          // 通过 API Key 获取实际的视频 URL
+          const actualUrl = await getVideoContentUrl(videoId);
+          console.log('[Media API] Sora content URL resolved:', actualUrl?.substring(0, 80));
+          resultUrl = actualUrl;
+        } catch (error) {
+          console.error('[Media API] Failed to get Sora content URL:', error);
+          return new NextResponse('Failed to get video URL', { status: 502 });
+        }
+      }
     }
     
     // 1. 本地文件存储 (file:xxx.png)
@@ -36,8 +56,13 @@ export async function GET(
       return createMediaResponse(file.buffer, file.mimeType);
     }
     
-    // 2. 外部 URL，代理请求
+    // 2. 外部 URL，代理请求或重定向
     if (resultUrl.startsWith('http://') || resultUrl.startsWith('https://')) {
+      // 对于视频，直接重定向到外部 URL（避免代理大文件）
+      if (generation.type.includes('video')) {
+        return NextResponse.redirect(resultUrl, 302);
+      }
+      // 对于图片，代理请求
       return await proxyExternalUrl(resultUrl, generation.type);
     }
     

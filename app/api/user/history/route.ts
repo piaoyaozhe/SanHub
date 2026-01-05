@@ -6,8 +6,9 @@ import { checkRateLimit, RateLimitConfig } from '@/lib/rate-limit';
 import type { Generation } from '@/types';
 
 // 处理媒体 URL：
-// - 视频：保持原始外部 URL（不代理）
-// - 图片：base64/file 转换为代理 URL
+// - 需要认证的 URL（如 /content）：转换为代理 URL
+// - 外部公开 URL：保持原样
+// - base64/file：转换为代理 URL
 function convertToMediaUrl(generation: Generation): Generation {
   const { resultUrl, type } = generation;
   
@@ -16,16 +17,15 @@ function convertToMediaUrl(generation: Generation): Generation {
     return generation;
   }
   
-  // 视频：保持原始 URL 不变（直接使用外部 URL）
-  if (type.includes('video')) {
-    // 如果意外存储为代理 URL，尝试返回原始格式
-    // 但如果是外部 http/https URL，直接返回
-    return generation;
+  // 需要 API Key 认证的 Sora /content URL，转换为代理 URL
+  if (resultUrl.includes('/v1/videos/') && resultUrl.includes('/content')) {
+    return {
+      ...generation,
+      resultUrl: `/api/media/${generation.id}`,
+    };
   }
   
-  // 图片：需要通过代理访问
-  // 1. base64 data URL
-  // 2. 本地文件 (file:xxx.png)
+  // base64 data URL 或本地文件，转换为代理 URL
   if (resultUrl.startsWith('data:') || resultUrl.startsWith('file:')) {
     return {
       ...generation,
@@ -33,7 +33,7 @@ function convertToMediaUrl(generation: Generation): Generation {
     };
   }
   
-  // 其他情况（如外部图片 URL）直接返回
+  // 外部公开 URL，保持原样
   return generation;
 }
 

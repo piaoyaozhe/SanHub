@@ -6,23 +6,23 @@ import { getGeneration } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 
 // 处理媒体 URL：
-// - 视频：保持原始外部 URL（不代理）
-// - 图片：base64/file 转换为代理 URL
+// - 需要认证的 URL（如 /content）：转换为代理 URL
+// - 外部公开 URL：保持原样
+// - base64/file：转换为代理 URL
 function convertToMediaUrl(resultUrl: string | undefined, id: string, type: string): string {
   if (!resultUrl) return '';
   
-  // 视频：保持原始 URL 不变
-  if (type.includes('video')) {
-    return resultUrl;
+  // 需要 API Key 认证的 Sora /content URL，转换为代理 URL
+  if (resultUrl.includes('/v1/videos/') && resultUrl.includes('/content')) {
+    return `/api/media/${id}`;
   }
   
-  // 图片：需要通过代理访问
-  // 1. base64 data URL
-  // 2. 本地文件 (file:xxx.png)
+  // base64 data URL 或本地文件，转换为代理 URL
   if (resultUrl.startsWith('data:') || resultUrl.startsWith('file:')) {
     return `/api/media/${id}`;
   }
   
+  // 外部公开 URL，保持原样
   return resultUrl;
 }
 
