@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 import { getSystemConfig } from './db';
 import { fetch as undiciFetch, FormData, File } from 'undici';
+import { fetchWithRetry } from './http-retry';
 
 // ========================================
 // PicUI 图床 API
@@ -78,25 +79,27 @@ export async function uploadToPicUI(
     // 转换为 Buffer
     const buffer = Buffer.from(pureBase64, 'base64');
 
-    // 创建 FormData
-    const formData = new FormData();
-    const file = new File([buffer], finalFilename, { type: mimeType });
-    formData.append('file', file);
-    formData.append('permission', '1'); // 公开
-
     const baseUrl = config.picuiBaseUrl.replace(/\/$/, '');
     const apiUrl = `${baseUrl}/upload`;
 
     console.log('[PicUI] 上传图片:', { filename: finalFilename, size: buffer.length });
 
-    const response = await undiciFetch(apiUrl, {
+    const buildFormData = () => {
+      const formData = new FormData();
+      const file = new File([buffer], finalFilename, { type: mimeType });
+      formData.append('file', file);
+      formData.append('permission', '1');
+      return formData;
+    };
+
+    const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.picuiApiKey}`,
         'Accept': 'application/json',
       },
-      body: formData,
-    });
+      body: buildFormData(),
+    }));
 
     const data = await response.json() as PicUIUploadResponse;
 

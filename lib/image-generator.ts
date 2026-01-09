@@ -5,6 +5,7 @@
 
 import { getImageModelWithChannel, getSystemConfig } from './db';
 import { uploadToPicUI } from './picui';
+import { fetchWithRetry } from './http-retry';
 import type { ChannelType, GenerateResult } from '@/types';
 
 export interface ImageGenerateRequest {
@@ -31,7 +32,7 @@ function getNextApiKey(keys: string, channelId: string): string {
 
 // 下载图片并转换为 base64
 async function downloadImageAsBase64(imageUrl: string): Promise<string> {
-  const response = await fetch(imageUrl);
+  const response = await fetchWithRetry(fetch, imageUrl);
   if (!response.ok) {
     throw new Error(`下载图片失败 (${response.status})`);
   }
@@ -93,14 +94,14 @@ async function generateWithOpenAI(
     payload.size = sizeMap[request.aspectRatio] || '1024x1024';
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  });
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -168,14 +169,14 @@ async function generateWithGemini(
     (generationConfig.imageConfig as Record<string, unknown>).imageSize = request.imageSize;
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts }],
       generationConfig,
     }),
-  });
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -224,12 +225,12 @@ async function pollModelScopeTask(baseUrl: string, apiKey: string, taskId: strin
   const interval = 5000;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const response = await fetch(`${baseUrl}v1/tasks/${taskId}`, {
+    const response = await fetchWithRetry(fetch, `${baseUrl}v1/tasks/${taskId}`, () => ({
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'X-ModelScope-Task-Type': 'image_generation',
       },
-    });
+    }));
 
     if (!response.ok) {
       throw new Error(`ModelScope 任务查询失败 (${response.status})`);
@@ -283,7 +284,7 @@ async function generateWithModelScope(
     ...(imageUrls.length > 0 && { image_url: imageUrls }),
   };
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -291,7 +292,7 @@ async function generateWithModelScope(
       ...(useAsync ? { 'X-ModelScope-Async-Mode': 'true' } : {}),
     },
     body: JSON.stringify(payload),
-  });
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -351,14 +352,14 @@ async function generateWithGitee(
     ...(size && { size }),
   };
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  });
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -389,27 +390,31 @@ async function generateWithGiteeUpscale(
   const input = request.images?.[0];
   if (!input?.data) throw new Error('缺少参考图');
 
-  const formData = new FormData();
-  formData.append('model', apiModel);
-  formData.append('outscale', '1');
-  formData.append('output_format', 'jpg');
+  const buildFormData = () => {
+    const formData = new FormData();
+    formData.append('model', apiModel);
+    formData.append('outscale', '1');
+    formData.append('output_format', 'jpg');
 
-  if (input.data.startsWith('http')) {
-    formData.append('image_url', input.data);
-  } else {
-    const parsed = parseDataUrl(input.data);
-    const mimeType = parsed?.mimeType || input.mimeType || 'application/octet-stream';
-    const base64Data = parsed?.data || input.data;
-    const buffer = Buffer.from(base64Data, 'base64');
-    const blob = new Blob([buffer], { type: mimeType });
-    formData.append('image', blob, 'input.jpg');
-  }
+    if (input.data.startsWith('http')) {
+      formData.append('image_url', input.data);
+    } else {
+      const parsed = parseDataUrl(input.data);
+      const mimeType = parsed?.mimeType || input.mimeType || 'application/octet-stream';
+      const base64Data = parsed?.data || input.data;
+      const buffer = Buffer.from(base64Data, 'base64');
+      const blob = new Blob([buffer], { type: mimeType });
+      formData.append('image', blob, 'input.jpg');
+    }
 
-  const response = await fetch(url, {
+    return formData;
+  };
+
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}` },
-    body: formData,
-  });
+    body: buildFormData(),
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -436,28 +441,32 @@ async function generateWithGiteeMatting(
   const input = request.images?.[0];
   if (!input?.data) throw new Error('缺少参考图');
 
-  const formData = new FormData();
-  formData.append('model', apiModel);
+  const buildFormData = () => {
+    const formData = new FormData();
+    formData.append('model', apiModel);
 
-  if (input.data.startsWith('http')) {
-    formData.append('image_url', input.data);
-  } else {
-    const parsed = parseDataUrl(input.data);
-    const mimeType = parsed?.mimeType || input.mimeType || 'application/octet-stream';
-    const base64Data = parsed?.data || input.data;
-    const buffer = Buffer.from(base64Data, 'base64');
-    const blob = new Blob([buffer], { type: mimeType });
-    formData.append('image', blob, 'input.webp');
-  }
+    if (input.data.startsWith('http')) {
+      formData.append('image_url', input.data);
+    } else {
+      const parsed = parseDataUrl(input.data);
+      const mimeType = parsed?.mimeType || input.mimeType || 'application/octet-stream';
+      const base64Data = parsed?.data || input.data;
+      const buffer = Buffer.from(base64Data, 'base64');
+      const blob = new Blob([buffer], { type: mimeType });
+      formData.append('image', blob, 'input.webp');
+    }
 
-  const response = await fetch(url, {
+    return formData;
+  };
+
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'X-Failover-Enabled': 'true',
     },
-    body: formData,
-  });
+    body: buildFormData(),
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -526,14 +535,14 @@ async function generateWithSora(
     payload.input_image = img.data;
   }
 
-  const response = await fetch(url, {
+  const response = await fetchWithRetry(fetch, url, () => ({
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
-  });
+  }));
 
   if (!response.ok) {
     const errorText = await response.text();

@@ -1,5 +1,6 @@
 import dns from 'dns/promises';
 import net from 'net';
+import { fetchWithRetry } from './http-retry';
 
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_MAX_REDIRECTS = 3;
@@ -181,12 +182,12 @@ export async function fetchExternalBuffer(
 
   try {
     for (let i = 0; i <= maxRedirects; i += 1) {
-      const response = await fetch(currentUrl.toString(), {
+      const response = await fetchWithRetry(fetch, currentUrl.toString(), () => ({
         method: 'GET',
         headers,
         redirect: 'manual',
         signal: controller.signal,
-      });
+      }));
 
       if (isRedirectStatus(response.status)) {
         const location = response.headers.get('location');

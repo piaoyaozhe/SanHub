@@ -10,14 +10,12 @@ import {
   Sparkles,
   Loader2,
   AlertCircle,
-  ChevronDown,
   Wand2,
   Film,
   Link as LinkIcon,
   Dices,
   Info,
   User,
-  X,
 } from 'lucide-react';
 import { cn, fileToBase64 } from '@/lib/utils';
 import { toast } from '@/components/ui/toaster';
@@ -57,7 +55,6 @@ export default function VideoGenerationPage() {
 
   // 模型选择
   const [selectedModelId, setSelectedModelId] = useState<string>('');
-  const [showModelDropdown, setShowModelDropdown] = useState(false);
 
   // 参数状态
   const [aspectRatio, setAspectRatio] = useState<string>('landscape');
@@ -94,9 +91,6 @@ export default function VideoGenerationPage() {
 
   // 角色卡选择
   const [characterCards, setCharacterCards] = useState<CharacterCard[]>([]);
-  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
-  const [librarySearchQuery, setLibrarySearchQuery] = useState('');
-  const [displayLimit, setDisplayLimit] = useState(20);
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
   const remixPromptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -190,6 +184,12 @@ export default function VideoGenerationPage() {
     setter: (value: string) => void
   ) => {
     setter(e.target.value);
+  };
+
+  const handleAddCharacter = (characterName: string) => {
+    const mention = `@${characterName}`;
+    setPrompt((prev) => (prev ? `${prev} ${mention}` : mention));
+    promptTextareaRef.current?.focus();
   };
 
   // 轮询任务状态
@@ -682,38 +682,23 @@ export default function VideoGenerationPage() {
               {/* Model Selection */}
               <div className="space-y-2">
                 <label className="text-xs text-white/50 uppercase tracking-wider">模型</label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg focus:outline-none focus:border-white/30"
-                  >
-                    <div className="flex flex-col items-start">
-                      <span className="text-sm font-medium">{currentModel?.name || '选择模型'}</span>
-                      <span className="text-xs text-white/50">{currentModel?.description || ''}</span>
-                    </div>
-                    <ChevronDown className={`w-4 h-4 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
-                  </button>
-                  {showModelDropdown && (
-                    <div className="absolute z-10 w-full mt-1 bg-zinc-900 border border-white/10 rounded-lg shadow-lg overflow-hidden">
-                      {availableModels.map((model) => (
-                        <button
-                          key={model.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedModelId(model.id);
-                            setShowModelDropdown(false);
-                          }}
-                          className={`w-full flex flex-col items-start px-3 py-2.5 hover:bg-white/10 transition-colors ${
-                            selectedModelId === model.id ? 'bg-white/10' : ''
-                          }`}
-                        >
-                          <span className="text-sm font-medium text-white">{model.name}</span>
-                          <span className="text-xs text-white/50">{model.description}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                  {availableModels.map((model) => (
+                    <button
+                      key={model.id}
+                      type="button"
+                      title={model.description || model.name}
+                      onClick={() => setSelectedModelId(model.id)}
+                      className={cn(
+                        'px-3 py-2 rounded-lg border text-xs font-medium transition-all shrink-0',
+                        selectedModelId === model.id
+                          ? 'bg-white text-black border-white'
+                          : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
+                      )}
+                    >
+                      <span className="max-w-[140px] truncate">{model.name}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -721,19 +706,19 @@ export default function VideoGenerationPage() {
               {currentModel && (
               <div className="space-y-2">
                 <label className="text-xs text-white/50 uppercase tracking-wider">画面比例</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                   {currentModel.aspectRatios.map((r) => (
                     <button
                       key={r.value}
                       onClick={() => setAspectRatio(r.value)}
                       className={cn(
-                        'flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border transition-all',
+                        'flex items-center gap-1.5 px-3 py-2 rounded-lg border transition-all text-xs font-medium shrink-0',
                         aspectRatio === r.value
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
                       )}
                     >
-                      <span className="text-base">{r.value === 'landscape' ? '▬' : '▮'}</span>
+                      <span className="text-sm">{r.value === 'landscape' ? '▬' : '▮'}</span>
                       <span className="text-xs font-medium">{r.label}</span>
                     </button>
                   ))}
@@ -745,13 +730,13 @@ export default function VideoGenerationPage() {
               {currentModel && (
               <div className="space-y-2">
                 <label className="text-xs text-white/50 uppercase tracking-wider">视频时长</label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                   {currentModel.durations.map((d) => (
                     <button
                       key={d.value}
                       onClick={() => setDuration(d.value)}
                       className={cn(
-                        'px-3 py-2.5 rounded-lg border transition-all text-sm font-medium',
+                        'px-3 py-2 rounded-lg border transition-all text-xs font-medium shrink-0',
                         duration === d.value
                           ? 'bg-white text-black border-white'
                           : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'
@@ -780,13 +765,13 @@ export default function VideoGenerationPage() {
                         </button>
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                       {VIDEO_STYLES.map((style) => (
                         <button
                           key={style.id}
                           onClick={() => setSelectedStyle(selectedStyle === style.id ? null : style.id)}
                           className={cn(
-                            'relative aspect-video rounded-lg overflow-hidden border-2 transition-all',
+                            'relative w-20 h-12 rounded-md overflow-hidden border-2 transition-all shrink-0',
                             selectedStyle === style.id
                               ? 'border-purple-500 ring-2 ring-purple-500/30'
                               : 'border-white/10 hover:border-white/30'
@@ -804,8 +789,8 @@ export default function VideoGenerationPage() {
                             <span className="text-[10px] font-medium text-white">{style.name}</span>
                           </div>
                           {selectedStyle === style.id && (
-                            <div className="absolute top-1 right-1 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center">
-                              <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                            <div className="absolute top-1 right-1 w-3.5 h-3.5 bg-purple-500 rounded-full flex items-center justify-center">
+                              <svg className="w-2 h-2 text-white" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                               </svg>
                             </div>
@@ -813,7 +798,7 @@ export default function VideoGenerationPage() {
                         </button>
                       ))}
                     </div>
-                    <p className="text-[10px] text-white/30">可选：选择一个风格应用到生成的视频</p>
+                    <p className="text-[10px] text-white/30">可选：点选一个风格应用到生成</p>
                   </div>
 
                   {currentModel?.features.imageToVideo && (
@@ -864,20 +849,6 @@ export default function VideoGenerationPage() {
                   <div className="space-y-2 relative">
                     <div className="flex items-center justify-between">
                       <label className="text-xs text-white/50 uppercase tracking-wider">创作描述</label>
-                      {characterCards.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowCharacterLibrary(!showCharacterLibrary);
-                            setLibrarySearchQuery('');
-                            setDisplayLimit(20); // 重置显示数量
-                          }}
-                          className="flex items-center gap-1.5 px-2.5 py-1 bg-gradient-to-r from-pink-500/10 to-purple-500/10 border border-pink-500/20 rounded-md hover:from-pink-500/20 hover:to-purple-500/20 transition-all"
-                        >
-                          <User className="w-3 h-3 text-pink-400" />
-                          <span className="text-[11px] text-pink-400">角色卡库</span>
-                        </button>
-                      )}
                     </div>
                     <textarea
                       ref={promptTextareaRef}
@@ -886,6 +857,35 @@ export default function VideoGenerationPage() {
                       placeholder="描述你想要生成的内容，越详细效果越好..."
                       className="w-full h-20 px-3 py-2.5 bg-white/5 border border-white/10 text-white rounded-lg resize-none focus:outline-none focus:border-white/30 placeholder:text-white/30 text-sm"
                     />
+                    {characterCards.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-white/50 uppercase tracking-wider">角色卡</span>
+                          <span className="text-[10px] text-white/30">点击添加到描述</span>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                          {characterCards.map((card) => (
+                            <button
+                              key={card.id}
+                              type="button"
+                              onClick={() => handleAddCharacter(card.characterName)}
+                              className="flex items-center gap-2 px-2 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-pink-500/30 rounded-full text-xs text-white/80 transition-all shrink-0"
+                            >
+                              <div className="w-5 h-5 rounded-full overflow-hidden bg-gradient-to-br from-pink-500/20 to-purple-500/20 shrink-0">
+                                {card.avatarUrl ? (
+                                  <img src={card.avatarUrl} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <User className="w-3 h-3 text-pink-400/60" />
+                                  </div>
+                                )}
+                              </div>
+                              <span className="max-w-[120px] truncate">@{card.characterName}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -1026,119 +1026,6 @@ export default function VideoGenerationPage() {
         </div>
       </div>
 
-      {/* 角色卡库弹窗 Modal */}
-      {showCharacterLibrary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-zinc-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            {/* Header */}
-            <div className="px-4 sm:px-6 py-4 border-b border-white/10 bg-gradient-to-r from-pink-500/10 to-purple-500/10">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-pink-500/20 to-purple-500/20 flex items-center justify-center">
-                    <User className="w-4 h-4 text-pink-400" />
-                  </div>
-                  <h3 className="text-base sm:text-lg font-semibold text-white">角色卡库</h3>
-                </div>
-                <button
-                  onClick={() => setShowCharacterLibrary(false)}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Search */}
-            {characterCards.length > 0 && (
-              <div className="px-3 sm:px-4 py-3 border-b border-white/10 space-y-2">
-                <input
-                  type="text"
-                  value={librarySearchQuery}
-                  onChange={(e) => setLibrarySearchQuery(e.target.value)}
-                  placeholder="搜索角色名..."
-                  className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pink-500/30 transition-colors"
-                />
-                <p className="text-xs text-white/40 text-center">
-                  共 {characterCards.length} 个角色卡
-                </p>
-              </div>
-            )}
-
-            {/* Content */}
-            <div className="max-h-[60vh] sm:max-h-96 overflow-y-auto p-3 sm:p-4">
-              {characterCards.length > 0 ? (
-                (() => {
-                  const filtered = characterCards.filter((card) => 
-                    card.characterName.toLowerCase().includes(librarySearchQuery.toLowerCase())
-                  );
-                  const displayed = filtered.slice(0, displayLimit);
-                  const hasMore = filtered.length > displayLimit;
-                  
-                  return filtered.length > 0 ? (
-                    <>
-                      <div className="grid grid-cols-1 gap-2.5">
-                        {displayed.map((card) => (
-                    <button
-                      key={card.id}
-                      type="button"
-                      onClick={() => {
-                        const mention = `@${card.characterName}`;
-                        setPrompt(prev => prev ? `${prev} ${mention}` : mention);
-                        setShowCharacterLibrary(false);
-                      }}
-                      className="w-full flex items-center gap-3 sm:gap-4 px-3 sm:px-4 py-3 sm:py-3.5 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-left border border-white/10 hover:border-pink-500/30 active:scale-[0.98]"
-                    >
-                      <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl overflow-hidden bg-gradient-to-br from-pink-500/20 to-purple-500/20 shrink-0">
-                        {card.avatarUrl ? (
-                          <img src={card.avatarUrl} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <User className="w-7 h-7 sm:w-8 sm:h-8 text-pink-400/50" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm sm:text-base font-medium text-white truncate">
-                          @{card.characterName}
-                        </p>
-                        <p className="text-xs sm:text-sm text-white/40 mt-0.5">点击添加到描述</p>
-                      </div>
-                    </button>
-                        ))}
-                      </div>
-                      
-                      {/* 加载更多按钮 */}
-                      {hasMore && (
-                        <div className="mt-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setDisplayLimit(prev => prev + 20)}
-                            className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-pink-500/30 rounded-lg text-sm text-white/70 hover:text-white transition-all"
-                          >
-                            加载更多 ({filtered.length - displayLimit} 个)
-                          </button>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="px-4 py-12 text-center">
-                      <User className="w-12 h-12 mx-auto text-white/20 mb-3" />
-                      <p className="text-white/40 text-sm">未找到匹配的角色卡</p>
-                      <p className="text-white/30 text-xs mt-1">尝试其他关键词</p>
-                    </div>
-                  );
-                })()
-              ) : (
-                <div className="px-4 py-12 text-center">
-                  <User className="w-12 h-12 mx-auto text-white/20 mb-3" />
-                  <p className="text-white/40 text-sm">暂无角色卡</p>
-                  <p className="text-white/30 text-xs mt-1">前往角色卡生成页面创建</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

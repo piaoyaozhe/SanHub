@@ -2,6 +2,7 @@
 import { getSystemConfig, getVideoChannels, getVideoChannel } from './db';
 import { fetch as undiciFetch, Agent, FormData } from 'undici';
 import type { VideoChannel } from '@/types';
+import { fetchWithRetry } from './http-retry';
 
 // ========================================
 // Sora OpenAI-Style Non-Streaming API
@@ -217,13 +218,13 @@ export async function getVideoStatus(videoId: string, channelId?: string): Promi
   
   console.log('[Sora API v5] 查询视频状态:', apiUrl);
   
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
   
   const rawData = await response.json() as any;
   console.log('[Sora API v5] 查询响应:', JSON.stringify(rawData).substring(0, 200));
@@ -299,14 +300,14 @@ export async function getVideoContentUrl(videoId: string, channelId?: string): P
   console.log('[Sora API v5] 获取视频内容:', apiUrl);
   
   // 使用 redirect: 'manual' 来捕获 302 重定向的 Location
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     redirect: 'manual',
     dispatcher: soraAgent,
-  });
+  }));
   
   console.log('[Sora API v5] /content 响应状态:', response.status);
   
@@ -434,34 +435,36 @@ export async function generateVideo(
     hasInputImage: !!request.input_image,
   });
 
-  // 使用 form-data 格式
-  const formData = new FormData();
-  
-  const prompt = request.prompt || 'Generate video';
-  
-  formData.append('prompt', prompt);
-  if (request.model) formData.append('model', request.model);
-  if (request.seconds) formData.append('seconds', request.seconds);
-  if (request.size) formData.append('size', request.size);
-  if (request.orientation) formData.append('orientation', request.orientation);
-  if (request.style_id) formData.append('style_id', request.style_id);
-  if (request.remix_target_id) formData.append('remix_target_id', request.remix_target_id);
-  
-  // 如果有输入图片，转换为 Blob
-  if (request.input_image) {
-    const imageBuffer = Buffer.from(request.input_image, 'base64');
-    const imageBlob = new Blob([imageBuffer], { type: 'image/jpeg' });
-    formData.append('input_reference', imageBlob, 'input.jpg');
-  }
+  const buildFormData = () => {
+    const formData = new FormData();
 
-  const response = await undiciFetch(apiUrl, {
+    const prompt = request.prompt || 'Generate video';
+
+    formData.append('prompt', prompt);
+    if (request.model) formData.append('model', request.model);
+    if (request.seconds) formData.append('seconds', request.seconds);
+    if (request.size) formData.append('size', request.size);
+    if (request.orientation) formData.append('orientation', request.orientation);
+    if (request.style_id) formData.append('style_id', request.style_id);
+    if (request.remix_target_id) formData.append('remix_target_id', request.remix_target_id);
+
+    if (request.input_image) {
+      const imageBuffer = Buffer.from(request.input_image, 'base64');
+      const imageBlob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      formData.append('input_reference', imageBlob, 'input.jpg');
+    }
+
+    return formData;
+  };
+
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
-    body: formData,
+    body: buildFormData(),
     dispatcher: soraAgent,
-  });
+  }));
 
   const rawData = await response.json() as any;
 
@@ -618,32 +621,36 @@ export async function createVideoTask(request: VideoGenerationRequest): Promise<
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   const apiUrl = `${normalizedBaseUrl}/v1/videos`;
 
-  const formData = new FormData();
-  
-  formData.append('prompt', request.prompt || 'Generate video');
-  formData.append('async_mode', 'true');
-  
-  if (request.model) formData.append('model', request.model);
-  if (request.seconds) formData.append('seconds', request.seconds);
-  if (request.size) formData.append('size', request.size);
-  if (request.orientation) formData.append('orientation', request.orientation);
-  if (request.style_id) formData.append('style_id', request.style_id);
-  if (request.remix_target_id) formData.append('remix_target_id', request.remix_target_id);
-  
-  if (request.input_image) {
-    const imageBuffer = Buffer.from(request.input_image, 'base64');
-    const imageBlob = new Blob([imageBuffer], { type: 'image/jpeg' });
-    formData.append('input_reference', imageBlob, 'input.jpg');
-  }
+  const buildFormData = () => {
+    const formData = new FormData();
 
-  const response = await undiciFetch(apiUrl, {
+    formData.append('prompt', request.prompt || 'Generate video');
+    formData.append('async_mode', 'true');
+
+    if (request.model) formData.append('model', request.model);
+    if (request.seconds) formData.append('seconds', request.seconds);
+    if (request.size) formData.append('size', request.size);
+    if (request.orientation) formData.append('orientation', request.orientation);
+    if (request.style_id) formData.append('style_id', request.style_id);
+    if (request.remix_target_id) formData.append('remix_target_id', request.remix_target_id);
+
+    if (request.input_image) {
+      const imageBuffer = Buffer.from(request.input_image, 'base64');
+      const imageBlob = new Blob([imageBuffer], { type: 'image/jpeg' });
+      formData.append('input_reference', imageBlob, 'input.jpg');
+    }
+
+    return formData;
+  };
+
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
-    body: formData,
+    body: buildFormData(),
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -684,7 +691,7 @@ export async function remixVideo(
     model: request.model,
   });
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -699,7 +706,7 @@ export async function remixVideo(
       async_mode: request.async_mode ?? true,
     }),
     dispatcher: soraAgent,
-  });
+  }));
 
   const rawData = await response.json() as any;
   console.log('[Sora API] Remix 响应:', JSON.stringify(rawData).substring(0, 200));
@@ -772,7 +779,7 @@ export async function createRemixTask(
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   const apiUrl = `${normalizedBaseUrl}/v1/videos/${encodeURIComponent(videoId)}/remix`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -787,7 +794,7 @@ export async function createRemixTask(
       async_mode: true,
     }),
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -843,7 +850,7 @@ export async function generateImage(request: ImageGenerationRequest): Promise<Im
     prompt: request.prompt?.substring(0, 50),
   });
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -851,7 +858,7 @@ export async function generateImage(request: ImageGenerationRequest): Promise<Im
     },
     body: JSON.stringify(request),
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -908,28 +915,30 @@ export async function createCharacterCard(request: CharacterCardRequest): Promis
 
   console.log('[Sora API] 角色卡创建请求');
 
-  // 使用 form-data 格式
-  const formData = new FormData();
-  formData.append('model', request.model || 'sora-video-10s');
-  formData.append('timestamps', request.timestamps || '0,3');
-  if (request.username) formData.append('username', request.username);
-  if (request.display_name) formData.append('display_name', request.display_name);
-  if (request.instruction_set) formData.append('instruction_set', request.instruction_set);
-  if (request.safety_instruction_set) formData.append('safety_instruction_set', request.safety_instruction_set);
-  
-  // 视频转换为 Blob
-  const videoBuffer = Buffer.from(request.video_base64, 'base64');
-  const videoBlob = new Blob([videoBuffer], { type: 'video/mp4' });
-  formData.append('video', videoBlob, 'video.mp4');
+  const buildFormData = () => {
+    const formData = new FormData();
+    formData.append('model', request.model || 'sora-video-10s');
+    formData.append('timestamps', request.timestamps || '0,3');
+    if (request.username) formData.append('username', request.username);
+    if (request.display_name) formData.append('display_name', request.display_name);
+    if (request.instruction_set) formData.append('instruction_set', request.instruction_set);
+    if (request.safety_instruction_set) formData.append('safety_instruction_set', request.safety_instruction_set);
 
-  const response = await undiciFetch(apiUrl, {
+    const videoBuffer = Buffer.from(request.video_base64, 'base64');
+    const videoBlob = new Blob([videoBuffer], { type: 'video/mp4' });
+    formData.append('video', videoBlob, 'video.mp4');
+
+    return formData;
+  };
+
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
-    body: formData,
+    body: buildFormData(),
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -1006,13 +1015,13 @@ export async function getFeed(request: FeedRequest = {}): Promise<FeedResponse> 
 
   const apiUrl = `${normalizedBaseUrl}/v1/feed?${params.toString()}`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -1052,13 +1061,13 @@ export async function getProfile(username: string): Promise<ProfileResponse> {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   const apiUrl = `${normalizedBaseUrl}/v1/profiles/${encodeURIComponent(username)}`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -1097,13 +1106,13 @@ export async function getUserFeed(request: UserFeedRequest): Promise<FeedRespons
 
   const apiUrl = `${normalizedBaseUrl}/v1/users/${encodeURIComponent(request.user_id)}/feed?${params.toString()}`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -1157,13 +1166,13 @@ export async function searchCharacters(request: CharacterSearchRequest): Promise
 
   const apiUrl = `${normalizedBaseUrl}/v1/characters/search?${params.toString()}`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
@@ -1200,13 +1209,13 @@ export async function getInviteCode(): Promise<InviteCodeResponse> {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, '');
   const apiUrl = `${normalizedBaseUrl}/v1/invite-codes`;
 
-  const response = await undiciFetch(apiUrl, {
+  const response = await fetchWithRetry(undiciFetch, apiUrl, () => ({
     method: 'GET',
     headers: {
       Authorization: `Bearer ${apiKey}`,
     },
     dispatcher: soraAgent,
-  });
+  }));
 
   const data = await response.json() as any;
 
