@@ -190,7 +190,7 @@ const GenerationCard = memo(function GenerationCard({
             className="w-full h-full object-cover"
             muted
             loop
-            preload="none"
+            preload="metadata"
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
           />

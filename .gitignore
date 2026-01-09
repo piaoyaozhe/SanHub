@@ -124,6 +124,8 @@ json.json
 # Misc
 # ===================
 .cache/
+.lh/
+.lhignore
 *.bak
 *.tmp
 *.temp

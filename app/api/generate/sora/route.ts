@@ -74,6 +74,8 @@ async function processGenerationTask(
       resultUrl: result.url,
       params: {
         model: body.model,
+        videoId: result.videoId,
+        videoChannelId: result.videoChannelId,
         permalink: result.permalink,
         revised_prompt: result.revised_prompt,
       },

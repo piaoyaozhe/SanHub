@@ -16,6 +16,13 @@ function convertToMediaUrl(generation: Generation): Generation {
   if (!resultUrl) {
     return generation;
   }
+
+  if (type.includes('video')) {
+    return {
+      ...generation,
+      resultUrl: `/api/media/${generation.id}`,
+    };
+  }
   
   // 需要 API Key 认证的 Sora /content URL，转换为代理 URL
   if (resultUrl.includes('/v1/videos/') && resultUrl.includes('/content')) {

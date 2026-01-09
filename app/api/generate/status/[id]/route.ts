@@ -11,6 +11,10 @@ export const dynamic = 'force-dynamic';
 // - base64/file：转换为代理 URL
 function convertToMediaUrl(resultUrl: string | undefined, id: string, type: string): string {
   if (!resultUrl) return '';
+
+  if (type.includes('video')) {
+    return `/api/media/${id}`;
+  }
   
   // 需要 API Key 认证的 Sora /content URL，转换为代理 URL
   if (resultUrl.includes('/v1/videos/') && resultUrl.includes('/content')) {

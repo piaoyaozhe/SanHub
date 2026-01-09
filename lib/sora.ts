@@ -100,7 +100,10 @@ export async function generateWithSora(
   }
 
   // 调用非流式 API，传递进度回调
-  const result = await generateVideo(videoRequest, onProgress ? (progress) => onProgress(progress) : undefined);
+  const result = await generateVideo(
+    videoRequest,
+    onProgress ? (progress) => onProgress(progress) : undefined
+  );
 
   if (!result.data || result.data.length === 0 || !result.data[0].url) {
     throw new Error('视频生成失败：未返回有效的视频 URL');
@@ -116,6 +119,8 @@ export async function generateWithSora(
     type,
     url: first.url,
     cost,
+    videoId: result.id,
+    videoChannelId: result.channelId,
     permalink: typeof first.permalink === 'string' ? first.permalink : undefined,
     revised_prompt: typeof first.revised_prompt === 'string' ? first.revised_prompt : undefined,
   };

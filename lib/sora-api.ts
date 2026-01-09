@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
-import { getSystemConfig, getVideoChannels } from './db';
+import { getSystemConfig, getVideoChannels, getVideoChannel } from './db';
 import { fetch as undiciFetch, Agent, FormData } from 'undici';
+import type { VideoChannel } from '@/types';
 
 // ========================================
 // Sora OpenAI-Style Non-Streaming API
@@ -25,24 +26,56 @@ function parseVideoUrl(url: string | string[] | unknown): string {
   return String(url);
 }
 
+const DEFAULT_SORA_BASE_URL = 'http://localhost:8000';
+
+type SoraConfig = {
+  apiKey: string;
+  baseUrl: string;
+  channelId?: string;
+};
+
+let soraChannelCursor = 0;
+
+function pickRoundRobinChannel(channels: VideoChannel[]): VideoChannel {
+  const index = soraChannelCursor % channels.length;
+  soraChannelCursor = (soraChannelCursor + 1) % channels.length;
+  return channels[index];
+}
+
 // 获取 Sora 配置（优先从新渠道表读取，回退到旧 system_config）
-async function getSoraConfig(): Promise<{ apiKey: string; baseUrl: string }> {
-  // 优先从 video_channels 表获取 sora 类型的渠道
-  const channels = await getVideoChannels(true); // 只获取启用的
-  const soraChannel = channels.find(c => c.type === 'sora');
-  
-  if (soraChannel && soraChannel.apiKey) {
+async function getSoraConfig(options?: {
+  channelId?: string;
+  mode?: 'default' | 'round-robin';
+}): Promise<SoraConfig> {
+  if (options?.channelId) {
+    const channel = await getVideoChannel(options.channelId);
+    if (channel && channel.type === 'sora' && channel.apiKey) {
+      return {
+        apiKey: channel.apiKey,
+        baseUrl: channel.baseUrl || DEFAULT_SORA_BASE_URL,
+        channelId: channel.id,
+      };
+    }
+  }
+
+  const channels = await getVideoChannels(true);
+  const soraChannels = channels.filter(c => c.type === 'sora' && c.apiKey);
+  if (soraChannels.length > 0) {
+    const selected =
+      options?.mode === 'round-robin'
+        ? pickRoundRobinChannel(soraChannels)
+        : soraChannels[0];
     return {
-      apiKey: soraChannel.apiKey,
-      baseUrl: soraChannel.baseUrl || 'http://localhost:8000',
+      apiKey: selected.apiKey,
+      baseUrl: selected.baseUrl || DEFAULT_SORA_BASE_URL,
+      channelId: selected.id,
     };
   }
-  
-  // 回退到旧的 system_config
+
   const config = await getSystemConfig();
   return {
     apiKey: config.soraApiKey || '',
-    baseUrl: config.soraBaseUrl || 'http://localhost:8000',
+    baseUrl: config.soraBaseUrl || DEFAULT_SORA_BASE_URL,
   };
 }
 
@@ -147,6 +180,10 @@ export interface VideoGenerationResponse {
   }>;
 }
 
+export interface VideoGenerationResult extends VideoGenerationResponse {
+  channelId?: string;
+}
+
 // 自适应轮询间隔计算
 function getPollingInterval(progress: number, stallCount: number): number {
   // 基础间隔根据进度调整
@@ -168,8 +205,8 @@ function getPollingInterval(progress: number, stallCount: number): number {
 }
 
 // 查询视频任务状态
-export async function getVideoStatus(videoId: string): Promise<VideoTaskResponse> {
-  const { apiKey, baseUrl } = await getSoraConfig();
+export async function getVideoStatus(videoId: string, channelId?: string): Promise<VideoTaskResponse> {
+  const { apiKey, baseUrl } = await getSoraConfig({ channelId });
   
   if (!apiKey) {
     throw new Error('Sora API Key 未配置');
@@ -249,8 +286,8 @@ export async function getVideoStatus(videoId: string): Promise<VideoTaskResponse
 }
 
 // 获取视频内容 URL（通过 /content 端点，跟随 302 重定向）
-export async function getVideoContentUrl(videoId: string): Promise<string> {
-  const { apiKey, baseUrl } = await getSoraConfig();
+export async function getVideoContentUrl(videoId: string, channelId?: string): Promise<string> {
+  const { apiKey, baseUrl } = await getSoraConfig({ channelId });
   
   if (!apiKey) {
     throw new Error('Sora API Key 未配置');
@@ -310,14 +347,15 @@ export async function getVideoContentUrl(videoId: string): Promise<string> {
 // 轮询等待视频完成
 async function pollVideoCompletion(
   videoId: string,
-  onProgress?: (progress: number, status: string) => void
+  onProgress?: (progress: number, status: string) => void,
+  channelId?: string
 ): Promise<VideoTaskResponse> {
   let lastProgress = -1;
   let stallCount = 0;
   const maxStallCount = 60; // 最大停滞次数（约10分钟）
   
   while (true) {
-    const status = await getVideoStatus(videoId);
+    const status = await getVideoStatus(videoId, channelId);
     
     if (onProgress) {
       onProgress(status.progress, status.status);
@@ -336,7 +374,7 @@ async function pollVideoCompletion(
       if (!status.url) {
         try {
           console.log('[Sora API v5] 状态完成但无 URL，尝试 /content 端点');
-          const contentUrl = await getVideoContentUrl(videoId);
+          const contentUrl = await getVideoContentUrl(videoId, channelId);
           status.url = contentUrl;
         } catch (e) {
           console.log('[Sora API v5] /content 端点获取失败:', e);
@@ -368,9 +406,13 @@ async function pollVideoCompletion(
 
 export async function generateVideo(
   request: VideoGenerationRequest,
-  onProgress?: (progress: number, status: string) => void
-): Promise<VideoGenerationResponse> {
-  const { apiKey, baseUrl } = await getSoraConfig();
+  onProgress?: (progress: number, status: string) => void,
+  options?: { channelId?: string }
+): Promise<VideoGenerationResult> {
+  const { apiKey, baseUrl, channelId } = await getSoraConfig({
+    channelId: options?.channelId,
+    mode: options?.channelId ? 'default' : 'round-robin',
+  });
 
   if (!apiKey) {
     throw new Error('Sora API Key 未配置，请在管理后台「视频渠道」中配置 Sora 渠道');
@@ -514,6 +556,7 @@ export async function generateVideo(
             permalink: taskResponse.permalink,
             revised_prompt: taskResponse.revised_prompt,
           }],
+          channelId,
         };
       }
       // 状态是完成但没有 URL，尝试轮询获取
@@ -530,7 +573,7 @@ export async function generateVideo(
     // 如果还在处理中或需要获取 URL，轮询等待
     if (isInProgressStatus(taskResponse.status) || (taskResponse.id && !taskResponse.url)) {
       console.log('[Sora API v5] 开始轮询... taskId:', taskResponse.id);
-      const finalStatus = await pollVideoCompletion(taskResponse.id, onProgress);
+      const finalStatus = await pollVideoCompletion(taskResponse.id, onProgress, channelId);
       
       if (!finalStatus.url) {
         throw new Error('视频生成完成但未返回 URL');
@@ -547,6 +590,7 @@ export async function generateVideo(
           permalink: finalStatus.permalink,
           revised_prompt: finalStatus.revised_prompt,
         }],
+        channelId,
       };
     }
   }
@@ -554,7 +598,8 @@ export async function generateVideo(
   // 旧格式响应（直接返回 data 数组）
   if (data?.data && Array.isArray(data.data) && data.data.length > 0 && data.data[0]?.url) {
     console.log('[Sora API] 视频生成成功（旧格式）:', data.data[0].url);
-    return data as VideoGenerationResponse;
+    const legacy = data as VideoGenerationResponse;
+    return { ...legacy, channelId };
   }
 
   // 未知格式，抛出错误

@@ -39,9 +39,22 @@ export async function GET(
     }
     
     let resultUrl = generation.resultUrl;
+    const videoId = typeof generation.params?.videoId === 'string' ? generation.params.videoId : undefined;
+    const videoChannelId =
+      typeof generation.params?.videoChannelId === 'string' ? generation.params.videoChannelId : undefined;
     
     if (!resultUrl) {
       return new NextResponse('No Content', { status: 204 });
+    }
+
+    if (videoId) {
+      try {
+        const actualUrl = await getVideoContentUrl(videoId, videoChannelId);
+        console.log('[Media API] Sora content URL resolved by videoId:', actualUrl?.substring(0, 80));
+        resultUrl = actualUrl;
+      } catch (error) {
+        console.error('[Media API] Failed to resolve videoId content URL:', error);
+      }
     }
     
     // 检查是否是 Sora /content 端点 URL（需要 API Key 认证）
@@ -52,7 +65,7 @@ export async function GET(
         const videoId = match[1];
         try {
           // 通过 API Key 获取实际的视频 URL
-          const actualUrl = await getVideoContentUrl(videoId);
+          const actualUrl = await getVideoContentUrl(videoId, videoChannelId);
           console.log('[Media API] Sora content URL resolved:', actualUrl?.substring(0, 80));
           resultUrl = actualUrl;
         } catch (error) {

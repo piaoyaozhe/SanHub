@@ -96,6 +96,8 @@ export interface GenerationParams {
   loras?: string | Record<string, number>; // Z-Image LoRA 配置
   channel?: 'modelscope' | 'gitee'; // Z-Image 渠道
   imageCount?: number; // 参考图数量
+  videoId?: string;
+  videoChannelId?: string;
   permalink?: string;
   revised_prompt?: string;
   progress?: number; // 生成进度 0-100
@@ -387,6 +389,8 @@ export interface GenerateResult {
   type: GenerationType;
   url: string;
   cost: number;
+  videoId?: string;
+  videoChannelId?: string;
   permalink?: string;
   revised_prompt?: string;
 }
