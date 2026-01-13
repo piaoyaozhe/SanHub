@@ -3,7 +3,6 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import { useSession } from 'next-auth/react';
 import {
   Video,
   Upload,
@@ -67,7 +66,6 @@ function OptionGroup({ label, children, className, contentClassName }: OptionGro
 }
 
 export default function VideoGenerationPage() {
-  const { update } = useSession();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
@@ -314,8 +312,6 @@ export default function VideoGenerationPage() {
           const isCompletedStatus = status === 'completed' || status === 'succeeded';
 
           if (isCompletedStatus && resultUrl) {
-            await update();
-
             const generation: Generation = {
               id: data.data.id,
               userId: '',
