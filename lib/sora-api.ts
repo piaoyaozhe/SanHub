@@ -10,21 +10,90 @@ import { fetchWithRetry } from './http-retry';
 
 // 解析视频 URL（处理字符串、JSON 字符串数组、数组等格式）
 function parseVideoUrl(url: string | string[] | unknown): string {
-  if (typeof url === 'string') {
-    if (url.startsWith('[')) {
-      try {
-        const urls = JSON.parse(url);
-        return Array.isArray(urls) && urls.length > 0 ? urls[0] : url;
-      } catch {
-        return url;
-      }
+  if (Array.isArray(url)) {
+    return url.length > 0 ? parseVideoUrl(url[0]) : '';
+  }
+  if (typeof url !== 'string') {
+    return String(url);
+  }
+
+  const trimmed = url.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const parsedArray = tryParseJsonArray(trimmed);
+  if (parsedArray) {
+    return normalizeUrlString(parsedArray);
+  }
+
+  const unwrapped = unwrapEncodedArray(trimmed);
+  if (unwrapped) {
+    return normalizeUrlString(unwrapped);
+  }
+
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    const inner = trimmed.slice(1, -1).trim();
+    const innerParsed = tryParseJsonArray(inner);
+    if (innerParsed) {
+      return normalizeUrlString(innerParsed);
     }
-    return url;
+    const innerUnwrapped = unwrapEncodedArray(inner);
+    if (innerUnwrapped) {
+      return normalizeUrlString(innerUnwrapped);
+    }
   }
-  if (Array.isArray(url) && url.length > 0) {
-    return url[0];
+
+  return trimmed;
+}
+
+function tryParseJsonArray(value: string): string | null {
+  if (!value.startsWith('[')) {
+    return null;
   }
-  return String(url);
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return String(parsed[0]);
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function unwrapEncodedArray(value: string): string | null {
+  const trimmed = value.trim();
+  const lower = trimmed.toLowerCase();
+
+  const encodedOpen = '%5b%22';
+  const encodedClose = '%22%5d';
+  if (lower.startsWith(encodedOpen) && lower.endsWith(encodedClose)) {
+    return trimmed.slice(encodedOpen.length, trimmed.length - encodedClose.length);
+  }
+
+  const mixedOpen = '[%22';
+  const mixedClose = '%22]';
+  if (lower.startsWith(mixedOpen) && lower.endsWith(mixedClose)) {
+    return trimmed.slice(mixedOpen.length, trimmed.length - mixedClose.length);
+  }
+
+  return null;
+}
+
+function normalizeUrlString(value: string): string {
+  const trimmed = value.trim();
+  if (/^https?:%2f%2f/i.test(trimmed)) {
+    try {
+      return decodeURIComponent(trimmed);
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
 }
 
 const DEFAULT_SORA_BASE_URL = 'http://localhost:8000';
@@ -317,7 +386,7 @@ export async function getVideoContentUrl(videoId: string, channelId?: string): P
     const location = response.headers.get('location');
     console.log('[Sora API v5] /content 重定向 Location:', location?.substring(0, 100));
     if (location) {
-      return location;
+      return parseVideoUrl(location);
     }
   }
   
@@ -329,7 +398,7 @@ export async function getVideoContentUrl(videoId: string, channelId?: string): P
       const data = await response.json() as any;
       console.log('[Sora API v5] /content JSON 响应:', JSON.stringify(data).substring(0, 200));
       if (data?.url) {
-        return data.url;
+        return parseVideoUrl(data.url);
       }
     }
   }
