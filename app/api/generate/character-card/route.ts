@@ -14,6 +14,8 @@ export const dynamic = 'force-dynamic';
 interface CharacterCardRequest {
   videoBase64: string; // base64 编码的视频数据
   firstFrameBase64: string; // 视频第一帧的 base64 图片
+  username?: string; // 自定义角色用户名（不含 @）
+  displayName?: string; // 自定义角色显示名称
   instructionSet?: string; // 角色指令集
   safetyInstructionSet?: string; // 安全指令集
   timestamps?: string; // 时间戳
@@ -28,11 +30,13 @@ async function processCharacterCardTask(
   try {
     console.log(`[Task ${cardId}] 开始处理角色卡生成任务`);
 
-    // 调用非流式 API（不传 username/display_name，由系统自动分配）
+    // 调用非流式 API
     const result = await createCharacterCard({
       video_base64: body.videoBase64,
       model: 'sora-video-10s',
       timestamps: body.timestamps || '0,3',
+      username: body.username,
+      display_name: body.displayName,
       instruction_set: body.instructionSet,
       safety_instruction_set: body.safetyInstructionSet,
     });

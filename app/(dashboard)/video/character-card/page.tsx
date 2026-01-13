@@ -52,6 +52,8 @@ export default function CharacterCardPage() {
   const [dailyLimits, setDailyLimits] = useState<DailyLimitConfig>({ imageLimit: 0, videoLimit: 0, characterCardLimit: 0 });
   
   // 角色卡参数
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [instructionSet, setInstructionSet] = useState('');
   const [safetyInstructionSet, setSafetyInstructionSet] = useState('');
   
@@ -251,6 +253,8 @@ export default function CharacterCardPage() {
         body: JSON.stringify({
           videoBase64: videoFile.data,
           firstFrameBase64: videoFile.firstFrame,
+          username: username.trim() || undefined,
+          displayName: displayName.trim() || undefined,
           instructionSet: instructionSet.trim() || undefined,
           safetyInstructionSet: safetyInstructionSet.trim() || undefined,
           timestamps: `${timestampStart},${timestampEnd}`,
@@ -515,6 +519,31 @@ export default function CharacterCardPage() {
               {/* 角色信息（可选） */}
               <div className="space-y-3">
                 <label className="text-xs text-foreground/50 uppercase tracking-wider">角色信息（可选）</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] text-foreground/40 mb-1.5 block">用户名</label>
+                    <input
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                      placeholder="my_character"
+                      className="w-full px-3 py-2 bg-card/60 border border-border/70 text-foreground rounded-lg focus:outline-none focus:border-emerald-500/30 placeholder:text-foreground/30 text-sm transition-colors"
+                      maxLength={32}
+                    />
+                    <p className="text-[10px] text-foreground/30 mt-1">仅字母、数字、下划线</p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-foreground/40 mb-1.5 block">显示名称</label>
+                    <input
+                      type="text"
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      placeholder="My Character"
+                      className="w-full px-3 py-2 bg-card/60 border border-border/70 text-foreground rounded-lg focus:outline-none focus:border-emerald-500/30 placeholder:text-foreground/30 text-sm transition-colors"
+                      maxLength={64}
+                    />
+                  </div>
+                </div>
                 <div>
                   <label className="text-[10px] text-foreground/40 mb-1.5 block">人物介绍</label>
                   <textarea
