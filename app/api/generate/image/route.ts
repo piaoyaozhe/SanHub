@@ -9,10 +9,12 @@ import {
   getUserById,
   updateGeneration,
   getImageModel,
+  refundGenerationBalance,
 } from '@/lib/db';
 import { saveMediaAsync } from '@/lib/media-storage';
 import { checkRateLimit, RateLimitConfig } from '@/lib/rate-limit';
 import { fetchExternalBuffer } from '@/lib/safe-fetch';
+import type { Generation } from '@/types';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -43,7 +45,8 @@ async function fetchImageAsBase64(
 async function processGenerationTask(
   generationId: string,
   userId: string,
-  request: ImageGenerateRequest
+  request: ImageGenerateRequest,
+  prechargedCost: number
 ) {
   try {
     console.log(`[Task ${generationId}] 开始处理图像生成任务`);
@@ -56,8 +59,6 @@ async function processGenerationTask(
     const savedUrl = await saveMediaAsync(generationId, result.url);
 
     console.log(`[Task ${generationId}] 生成成功`);
-
-    await updateUserBalance(userId, -result.cost, 'strict');
 
     await updateGeneration(generationId, {
       status: 'completed',
@@ -72,6 +73,12 @@ async function processGenerationTask(
       status: 'failed',
       errorMessage: error instanceof Error ? error.message : '生成失败',
     });
+
+    try {
+      await refundGenerationBalance(generationId, userId, prechargedCost);
+    } catch (refundErr) {
+      console.error(`[Task ${generationId}] Refund failed:`, refundErr);
+    }
   }
 }
 
@@ -131,6 +138,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    try {
+      await updateUserBalance(user.id, -model.costPerGeneration, 'strict');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Insufficient balance';
+      if (message.includes('Insufficient balance')) {
+        return NextResponse.json(
+          { error: `余额不足，需要至少 ${model.costPerGeneration} 积分` },
+          { status: 402 }
+        );
+      }
+      throw err;
+    }
+
     // 处理参考图
     const origin = new URL(request.url).origin;
     const imageList: Array<{ mimeType: string; data: string }> = [];
@@ -178,20 +198,30 @@ export async function POST(request: NextRequest) {
     };
 
     // 保存生成记录
-    const generation = await saveGeneration({
-      userId: user.id,
-      type: 'gemini-image', // 统一类型，后续可根据需要细分
-      prompt: prompt || '',
-      params: {
-        model: model.apiModel,
-        aspectRatio,
-        imageSize,
-        imageCount: imageList.length,
-      },
-      resultUrl: '',
-      cost: model.costPerGeneration,
-      status: 'pending',
-    });
+    let generation: Generation;
+    try {
+      generation = await saveGeneration({
+        userId: user.id,
+        type: 'gemini-image', // 统一类型，后续可根据需要细分
+        prompt: prompt || '',
+        params: {
+          model: model.apiModel,
+          aspectRatio,
+          imageSize,
+          imageCount: imageList.length,
+        },
+        resultUrl: '',
+        cost: model.costPerGeneration,
+        status: 'pending',
+        balancePrecharged: true,
+        balanceRefunded: false,
+      });
+    } catch (saveErr) {
+      await updateUserBalance(user.id, model.costPerGeneration, 'strict').catch(refundErr => {
+        console.error('[API] Precharge rollback failed:', refundErr);
+      });
+      throw saveErr;
+    }
 
     console.log('[API] 图像生成任务已创建:', {
       id: generation.id,
@@ -200,7 +230,7 @@ export async function POST(request: NextRequest) {
     });
 
     // 后台处理
-    processGenerationTask(generation.id, user.id, generateRequest).catch((err) => {
+    processGenerationTask(generation.id, user.id, generateRequest, model.costPerGeneration).catch((err) => {
       console.error('[API] 后台任务启动失败:', err);
     });
 

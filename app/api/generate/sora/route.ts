@@ -3,8 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { generateWithSora } from '@/lib/sora';
-import { saveGeneration, updateUserBalance, getUserById, updateGeneration, getSystemConfig } from '@/lib/db';
-import type { SoraGenerateRequest } from '@/types';
+import { saveGeneration, updateUserBalance, getUserById, updateGeneration, getSystemConfig, refundGenerationBalance } from '@/lib/db';
+import type { Generation, SoraGenerateRequest } from '@/types';
 import { checkRateLimit, RateLimitConfig } from '@/lib/rate-limit';
 import { fetchExternalBuffer } from '@/lib/safe-fetch';
 
@@ -78,7 +78,8 @@ async function fetchImageAsBase64(imageUrl: string, origin: string): Promise<{ m
 async function processGenerationTask(
   generationId: string,
   userId: string,
-  body: SoraGenerateRequest
+  body: SoraGenerateRequest,
+  prechargedCost: number
 ): Promise<void> {
   try {
     console.log(`[Task ${generationId}] 开始处理生成任务`);
@@ -105,11 +106,6 @@ async function processGenerationTask(
     const result = await generateWithRateLimitRetry(body, onProgress, generationId);
 
     console.log(`[Task ${generationId}] 生成成功:`, result.url);
-
-    // 扣除余额
-    await updateUserBalance(userId, -result.cost, 'strict').catch(err => {
-      console.error(`[Task ${generationId}] 扣除余额失败:`, err);
-    });
 
     // 更新生成记录为完成状态
     await updateGeneration(generationId, {
@@ -148,6 +144,12 @@ async function processGenerationTask(
       });
     } catch (updateErr) {
       console.error(`[Task ${generationId}] 更新失败状态时出错:`, updateErr);
+    }
+
+    try {
+      await refundGenerationBalance(generationId, userId, prechargedCost);
+    } catch (refundErr) {
+      console.error(`[Task ${generationId}] Refund failed:`, refundErr);
     }
   }
 }
@@ -211,22 +213,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    try {
+      await updateUserBalance(user.id, -estimatedCost, 'strict');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Insufficient balance';
+      if (message.includes('Insufficient balance')) {
+        return NextResponse.json(
+          { error: `余额不足，需要至少 ${estimatedCost} 积分` },
+          { status: 402 }
+        );
+      }
+      throw err;
+    }
+
     // 生成类型固定为视频
     const type = 'sora-video';
 
     // 立即创建生成记录（状态为 pending）
-    const generation = await saveGeneration({
-      userId: user.id,
-      type,
-      prompt: body.prompt || '',
-      params: { model: body.model },
-      resultUrl: '',
-      cost: estimatedCost,
-      status: 'pending',
-    });
+    let generation: Generation;
+    try {
+      generation = await saveGeneration({
+        userId: user.id,
+        type,
+        prompt: body.prompt || '',
+        params: { model: body.model },
+        resultUrl: '',
+        cost: estimatedCost,
+        status: 'pending',
+        balancePrecharged: true,
+        balanceRefunded: false,
+      });
+    } catch (saveErr) {
+      await updateUserBalance(user.id, estimatedCost, 'strict').catch(refundErr => {
+        console.error('[API] Precharge rollback failed:', refundErr);
+      });
+      throw saveErr;
+    }
 
     // 在后台异步处理（不等待完成）
-    processGenerationTask(generation.id, user.id, normalizedBody).catch((err) => {
+    processGenerationTask(generation.id, user.id, normalizedBody, estimatedCost).catch((err) => {
       console.error('[API] 后台任务启动失败:', err);
     });
 

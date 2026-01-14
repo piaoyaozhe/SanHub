@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { generateImage } from '@/lib/sora-api';
-import { saveGeneration, updateUserBalance, getUserById, updateGeneration, getSystemConfig } from '@/lib/db';
+import { saveGeneration, updateUserBalance, getUserById, updateGeneration, getSystemConfig, refundGenerationBalance } from '@/lib/db';
 import { checkRateLimit, RateLimitConfig } from '@/lib/rate-limit';
 import { fetchExternalBuffer } from '@/lib/safe-fetch';
+import type { Generation } from '@/types';
 
 export const maxDuration = 120;
 export const dynamic = 'force-dynamic';
@@ -44,7 +45,8 @@ async function fetchImageAsBase64(
 async function processGenerationTask(
   generationId: string,
   userId: string,
-  body: SoraImageRequest
+  body: SoraImageRequest,
+  prechargedCost: number
 ): Promise<void> {
   try {
     console.log(`[Task ${generationId}] 开始处理 Sora 图像生成任务`);
@@ -70,8 +72,6 @@ async function processGenerationTask(
 
     console.log(`[Task ${generationId}] 生成成功:`, first.url);
 
-    await updateUserBalance(userId, -cost, 'strict');
-
     await updateGeneration(generationId, {
       status: 'completed',
       resultUrl: first.url,
@@ -90,6 +90,12 @@ async function processGenerationTask(
       status: 'failed',
       errorMessage: error instanceof Error ? error.message : '生成失败',
     });
+
+    try {
+      await refundGenerationBalance(generationId, userId, prechargedCost);
+    } catch (refundErr) {
+      console.error(`[Task ${generationId}] Refund failed:`, refundErr);
+    }
   }
 }
 
@@ -139,20 +145,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const generation = await saveGeneration({
-      userId: user.id,
-      type: 'sora-image',
-      prompt: normalizedBody.prompt,
-      params: {
-        model: normalizedBody.model,
-        size: normalizedBody.size,
-      },
-      resultUrl: '',
-      cost: estimatedCost,
-      status: 'pending',
-    });
+    try {
+      await updateUserBalance(user.id, -estimatedCost, 'strict');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Insufficient balance';
+      if (message.includes('Insufficient balance')) {
+        return NextResponse.json(
+          { error: `余额不足，需要至少 ${estimatedCost} 积分` },
+          { status: 402 }
+        );
+      }
+      throw err;
+    }
 
-    processGenerationTask(generation.id, user.id, normalizedBody).catch((err) => {
+    let generation: Generation;
+    try {
+      generation = await saveGeneration({
+        userId: user.id,
+        type: 'sora-image',
+        prompt: normalizedBody.prompt,
+        params: {
+          model: normalizedBody.model,
+          size: normalizedBody.size,
+        },
+        resultUrl: '',
+        cost: estimatedCost,
+        status: 'pending',
+        balancePrecharged: true,
+        balanceRefunded: false,
+      });
+    } catch (saveErr) {
+      await updateUserBalance(user.id, estimatedCost, 'strict').catch(refundErr => {
+        console.error('[API] Precharge rollback failed:', refundErr);
+      });
+      throw saveErr;
+    }
+
+    processGenerationTask(generation.id, user.id, normalizedBody, estimatedCost).catch((err) => {
       console.error('[API] Sora Image 后台任务启动失败:', err);
     });
 

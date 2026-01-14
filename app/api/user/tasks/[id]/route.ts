@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { getGeneration, updateGeneration } from '@/lib/db';
+import { getGeneration, updateGeneration, refundGenerationBalance } from '@/lib/db';
 
 // 取消任务
 export async function DELETE(
@@ -38,6 +38,12 @@ export async function DELETE(
     await updateGeneration(params.id, {
       status: 'cancelled',
     });
+
+    try {
+      await refundGenerationBalance(generation.id, generation.userId, generation.cost);
+    } catch (refundErr) {
+      console.error('[API] Failed to refund balance:', refundErr);
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

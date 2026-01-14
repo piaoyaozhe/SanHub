@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -21,6 +21,59 @@ interface SidebarProps {
   user: SafeUser;
 }
 
+type GenerationStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+interface VideoTaskStatus {
+  id: string;
+  status: GenerationStatus;
+  createdAt: number;
+  updatedAt: number;
+  durationMs?: number;
+  elapsedMs?: number;
+}
+
+const STATUS_POLL_MS = 10_000;
+const VIDEO_POLL_MS = 5 * 60 * 1000;
+const VIDEO_DISPLAY_LIMIT = 5;
+
+const statusLabelMap: Record<GenerationStatus, string> = {
+  pending: '排队中',
+  processing: '生成中',
+  completed: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+};
+
+const statusColorMap: Record<GenerationStatus, string> = {
+  pending: 'bg-amber-400',
+  processing: 'bg-sky-400',
+  completed: 'bg-emerald-400',
+  failed: 'bg-rose-400',
+  cancelled: 'bg-zinc-400',
+};
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+
+  if (hours > 0) parts.push(`${hours}小时`);
+  if (minutes > 0 || hours > 0) parts.push(`${minutes}分钟`);
+  parts.push(`${seconds}秒`);
+  return parts.join(' ');
+}
+
+function formatRelativeTime(timestamp: number | null): string {
+  if (!timestamp) return '未更新';
+  const deltaMs = Date.now() - timestamp;
+  if (deltaMs < 60_000) return '刚刚';
+  if (deltaMs < 60 * 60_000) return `${Math.floor(deltaMs / 60_000)}分钟前`;
+  if (deltaMs < 24 * 60 * 60_000) return `${Math.floor(deltaMs / (60 * 60_000))}小时前`;
+  return `${Math.floor(deltaMs / (24 * 60 * 60_000))}天前`;
+}
+
 const navItems = [
   { href: '/image', icon: Image, label: '图像生成', description: 'Gemini / Z-Image', badge: 'AI', isAI: true },
   { href: '/video', icon: Video, label: '视频生成', description: 'Sora / Remix / 分镜', badge: 'AI', isAI: true },
@@ -38,6 +91,58 @@ const adminItems = [
 export function Sidebar({ user }: SidebarProps) {
   const pathname = usePathname();
   const siteConfig = useSiteConfig();
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [pendingUpdatedAt, setPendingUpdatedAt] = useState<number | null>(null);
+  const [videoTasks, setVideoTasks] = useState<VideoTaskStatus[]>([]);
+  const [videoUpdatedAt, setVideoUpdatedAt] = useState<number | null>(null);
+
+  const fetchPendingTasks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/user/tasks');
+      if (!res.ok) return;
+      const data = await res.json();
+      const tasks = Array.isArray(data.data) ? data.data : [];
+      setPendingCount(tasks.length);
+      setPendingUpdatedAt(Date.now());
+    } catch (error) {
+      console.error('[Status Panel] Failed to fetch pending tasks:', error);
+    }
+  }, []);
+
+  const fetchVideoTasks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/user/status');
+      if (!res.ok) return;
+      const data = await res.json();
+      const payload = data?.data;
+      const rows = Array.isArray(payload?.tasks) ? payload.tasks : [];
+      const mapped = rows.map((item: VideoTaskStatus) => ({
+        id: String(item.id),
+        status: item.status,
+        createdAt: Number(item.createdAt) || 0,
+        updatedAt: Number(item.updatedAt) || Number(item.createdAt) || 0,
+        durationMs: typeof item.durationMs === 'number' ? item.durationMs : undefined,
+        elapsedMs: typeof item.elapsedMs === 'number' ? item.elapsedMs : undefined,
+      }));
+
+      setVideoTasks(mapped.slice(0, VIDEO_DISPLAY_LIMIT));
+      setVideoUpdatedAt(typeof payload?.updatedAt === 'number' ? payload.updatedAt : Date.now());
+    } catch (error) {
+      console.error('[Status Panel] Failed to fetch video tasks:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchPendingTasks();
+    const interval = setInterval(fetchPendingTasks, STATUS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [fetchPendingTasks]);
+
+  useEffect(() => {
+    void fetchVideoTasks();
+    const interval = setInterval(fetchVideoTasks, VIDEO_POLL_MS);
+    return () => clearInterval(interval);
+  }, [fetchVideoTasks]);
 
   return (
     <>
@@ -121,6 +226,56 @@ export function Sidebar({ user }: SidebarProps) {
           })}
         </div>
       )}
+
+      {/* Status Panel */}
+      <div className="px-3 py-4 border-t border-border/70">
+        <p className="text-[10px] font-medium text-foreground/40 uppercase tracking-[0.2em] px-3 py-2">
+          状态面板
+        </p>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-border/70 bg-card/60 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-foreground/60">进行中任务</span>
+              <span className="text-sm font-semibold text-foreground">
+                {pendingCount ?? '--'}
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] text-foreground/40">
+              更新于 {formatRelativeTime(pendingUpdatedAt)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-border/70 bg-card/60 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-foreground/60">Sora 视频</span>
+              <span className="text-[10px] text-foreground/40">
+                更新于 {formatRelativeTime(videoUpdatedAt)}
+              </span>
+            </div>
+            <div className="mt-2 space-y-2">
+              {videoTasks.length === 0 ? (
+                <p className="text-[10px] text-foreground/40">暂无任务</p>
+              ) : (
+                videoTasks.map((task) => {
+                  const statusLabel = statusLabelMap[task.status] ?? '未知';
+                  const statusColor = statusColorMap[task.status] ?? 'bg-zinc-400';
+                  const durationMs = typeof task.durationMs === 'number' ? task.durationMs : task.elapsedMs;
+                  return (
+                    <div key={task.id} className="flex items-center justify-between text-[11px] text-foreground/70">
+                      <div className="flex items-center gap-2">
+                        <span className={cn('h-1.5 w-1.5 rounded-full', statusColor)} />
+                        <span className="text-[10px] uppercase tracking-wide">{statusLabel}</span>
+                      </div>
+                      <span className="text-foreground/50">
+                        {typeof durationMs === 'number' ? formatDuration(durationMs) : '--'}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Footer */}
       <div className="p-4 border-t border-border/70">

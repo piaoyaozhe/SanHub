@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS generations (
   params TEXT,
   result_url LONGTEXT,
   cost INT DEFAULT 0,
+  balance_precharged TINYINT(1) DEFAULT 0,
+  balance_refunded TINYINT(1) DEFAULT 0,
   status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
   error_message TEXT,
   created_at BIGINT NOT NULL,
@@ -226,6 +228,18 @@ export async function initializeDatabase(): Promise<void> {
 
   try {
     await db.execute('ALTER TABLE generations ADD COLUMN error_message TEXT');
+  } catch {
+    // 字段已存在，忽略错误
+  }
+
+  // 添加余额预扣/退款标记字段（如果不存在）
+  try {
+    await db.execute('ALTER TABLE generations ADD COLUMN balance_precharged TINYINT(1) DEFAULT 0');
+  } catch {
+    // 字段已存在，忽略错误
+  }
+  try {
+    await db.execute('ALTER TABLE generations ADD COLUMN balance_refunded TINYINT(1) DEFAULT 0');
   } catch {
     // 字段已存在，忽略错误
   }
@@ -769,11 +783,13 @@ export async function saveGeneration(
     id: generateId(),
     createdAt: now,
     updatedAt: now,
+    balancePrecharged: generation.balancePrecharged ?? false,
+    balanceRefunded: generation.balanceRefunded ?? false,
   };
 
   await db.execute(
-    `INSERT INTO generations (id, user_id, type, prompt, params, result_url, cost, status, error_message, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO generations (id, user_id, type, prompt, params, result_url, cost, balance_precharged, balance_refunded, status, error_message, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       gen.id,
       gen.userId,
@@ -782,6 +798,8 @@ export async function saveGeneration(
       JSON.stringify(gen.params),
       gen.resultUrl,
       gen.cost,
+      gen.balancePrecharged ? 1 : 0,
+      gen.balanceRefunded ? 1 : 0,
       gen.status,
       gen.errorMessage || null,
       gen.createdAt,
@@ -794,7 +812,7 @@ export async function saveGeneration(
 
 export async function updateGeneration(
   id: string,
-  updates: Partial<Pick<Generation, 'status' | 'resultUrl' | 'errorMessage' | 'params'>>
+  updates: Partial<Pick<Generation, 'status' | 'resultUrl' | 'errorMessage' | 'params' | 'balancePrecharged' | 'balanceRefunded'>>
 ): Promise<Generation | null> {
   await initializeDatabase();
   const db = getAdapter();
@@ -814,6 +832,14 @@ export async function updateGeneration(
     fields.push('params = ?');
     values.push(JSON.stringify(updates.params));
   }
+  if (updates.balancePrecharged !== undefined) {
+    fields.push('balance_precharged = ?');
+    values.push(updates.balancePrecharged ? 1 : 0);
+  }
+  if (updates.balanceRefunded !== undefined) {
+    fields.push('balance_refunded = ?');
+    values.push(updates.balanceRefunded ? 1 : 0);
+  }
   if (updates.errorMessage !== undefined) {
     fields.push('error_message = ?');
     values.push(updates.errorMessage);
@@ -826,6 +852,42 @@ export async function updateGeneration(
   );
 
   return getGeneration(id);
+}
+
+export async function refundGenerationBalance(
+  generationId: string,
+  userId: string,
+  cost: number
+): Promise<boolean> {
+  await initializeDatabase();
+  const db = getAdapter();
+
+  const safeCost = Number(cost);
+  const now = Date.now();
+
+  const [markResult] = await db.execute(
+    'UPDATE generations SET balance_refunded = 1, updated_at = ? WHERE id = ? AND user_id = ? AND balance_precharged = 1 AND balance_refunded = 0',
+    [now, generationId, userId]
+  );
+
+  if (!(markResult as any).affectedRows) {
+    return false;
+  }
+
+  if (!Number.isFinite(safeCost) || safeCost <= 0) {
+    return true;
+  }
+
+  try {
+    await updateUserBalance(userId, safeCost, 'strict');
+    return true;
+  } catch (error) {
+    await db.execute(
+      'UPDATE generations SET balance_refunded = 0, updated_at = ? WHERE id = ? AND user_id = ?',
+      [Date.now(), generationId, userId]
+    ).catch(() => {});
+    throw error;
+  }
 }
 
 export async function getUserGenerations(
@@ -852,6 +914,8 @@ export async function getUserGenerations(
     resultUrl: row.result_url,
     cost: row.cost,
     status: row.status || 'completed',
+    balancePrecharged: Boolean(row.balance_precharged),
+    balanceRefunded: Boolean(row.balance_refunded),
     errorMessage: row.error_message || undefined,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at || row.created_at),
@@ -878,6 +942,54 @@ export async function getPendingGenerations(userId: string, limit = 50): Promise
     resultUrl: row.result_url,
     cost: row.cost,
     status: row.status,
+    balancePrecharged: Boolean(row.balance_precharged),
+    balanceRefunded: Boolean(row.balance_refunded),
+    errorMessage: row.error_message || undefined,
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at || row.created_at),
+  }));
+}
+
+export async function getUserIdsWithRecentSoraVideos(sinceMs: number): Promise<string[]> {
+  await initializeDatabase();
+  const db = getAdapter();
+
+  const [rows] = await db.execute(
+    `SELECT DISTINCT user_id FROM generations
+     WHERE type = 'sora-video'
+     AND (created_at >= ? OR status IN ('pending', 'processing'))`,
+    [sinceMs]
+  );
+
+  return (rows as any[]).map((row) => String(row.user_id));
+}
+
+export async function getRecentSoraVideoGenerationsByUser(
+  userId: string,
+  limit = 20
+): Promise<Generation[]> {
+  await initializeDatabase();
+  const db = getAdapter();
+  const safeLimit = Math.max(Number(limit) || 20, 1);
+
+  const [rows] = await db.execute(
+    `SELECT * FROM generations
+     WHERE user_id = ? AND type = 'sora-video'
+     ORDER BY created_at DESC LIMIT ${safeLimit}`,
+    [userId]
+  );
+
+  return (rows as any[]).map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    type: row.type,
+    prompt: row.prompt,
+    params: typeof row.params === 'string' ? JSON.parse(row.params) : row.params,
+    resultUrl: row.result_url,
+    cost: row.cost,
+    status: row.status || 'completed',
+    balancePrecharged: Boolean(row.balance_precharged),
+    balanceRefunded: Boolean(row.balance_refunded),
     errorMessage: row.error_message || undefined,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at || row.created_at),
@@ -902,6 +1014,8 @@ export async function getGeneration(id: string): Promise<Generation | null> {
     resultUrl: row.result_url,
     cost: row.cost,
     status: row.status || 'completed',
+    balancePrecharged: Boolean(row.balance_precharged),
+    balanceRefunded: Boolean(row.balance_refunded),
     errorMessage: row.error_message || undefined,
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at || row.created_at),
